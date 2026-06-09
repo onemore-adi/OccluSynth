@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "occlusynth"
+version = "0.1.0"
+description = "Occlusion-Aware 3D Scene Reconstruction with VGGT-Omega + TSDF fusion"
+authors = [
+    {name = "Aditya Agarwal", email = "aditya.250852@gmail.com"},
+]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    "numpy<2",
+    "Pillow",
+    "torch>=2.3",
+    "torchvision>=0.18",
+    "einops",
+    "safetensors",
+    "opencv-python",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]
+viz = ["rerun-sdk"]
+fusion = ["open3d"]   # not yet available for Python 3.14; install in 3.11/3.12 venv
+
+[project.scripts]
+occlusynth-baseline  = "occlusynth.scripts.run_baseline:main"
+occlusynth-scale-fit = "occlusynth.scripts.run_scale_fit:main"
+occlusynth-fuse      = "occlusynth.scripts.run_fusion:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.occlusynth]
+# Override with env var OCCLUSYNTH_VGGT_PATH if you move the checkpoint
+vggt_omega_src     = "vggt/vggt-omega"
+default_checkpoint = "vggt/vggt-omega/checkpoints/vggt_omega_1b_512.pt"
+scannet_frames_25k = "data/scannet/tasks/scannet_frames_25k"
+cache_dir          = "demo_outputs/pred_cache"
