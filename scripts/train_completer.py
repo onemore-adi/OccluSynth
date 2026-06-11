@@ -1,0 +1,222 @@
+#!/usr/bin/env python
+"""
+train_completer.py — train the 3D voxel completer on 96³ ScanNet crops.
+
+Loss: L1(sdf_pred, sdf_gt) masked to SURFACE ∪ OCCLUDED voxels;
+UNOBSERVABLE and FREE are excluded entirely.
+
+Local MPS debug (mandatory before any cloud run):
+    .venv312/bin/python scripts/train_completer.py --device mps --epochs 2 \
+        --batch_size 2 --crop_size 64 --data_dir data/completer_crops --fast_dev_run
+
+Cloud A100:
+    python scripts/train_completer.py --device cuda --epochs 50 --batch_size 4 \
+        --crop_size 96
+
+Logging: wandb (project occlusynth-completer); falls back to offline mode when
+no API key is configured, --no_wandb disables it entirely.  Every 10 steps the
+train loss is logged; each epoch logs val loss + a cross-section slice image
+(input SDF | predicted SDF | GT SDF) saved under checkpoints/slices/ too.
+
+Checkpoints: best val loss → checkpoints/completer_best.pt, plus
+completer_epoch{N:03d}.pt every 10 epochs.
+"""
+
+import argparse
+import os
+import time
+from pathlib import Path
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader, Dataset
+
+from occlusynth.models.completer import (OccluSynthCompleter, masked_l1_loss,
+                                         SURFACE, OCCLUDED)
+
+
+# ── data ──────────────────────────────────────────────────────────────────────
+
+class CompleterCropDataset(Dataset):
+    """96³ .npz crops; optionally sub-crops to a smaller cube (debug runs)."""
+
+    def __init__(self, crop_dir: Path, crop_size: int = 96, train: bool = True):
+        self.files = sorted(Path(crop_dir).glob("*.npz"))
+        if not self.files:
+            raise FileNotFoundError(f"no .npz crops in {crop_dir}")
+        self.crop_size = crop_size
+        self.train = train
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        z = np.load(self.files[idx])
+        inp = z["input"].astype(np.float32)      # (3, 96, 96, 96)
+        tgt = z["target"].astype(np.float32)     # (96, 96, 96)
+        state = z["state"]                       # (96, 96, 96) uint8
+
+        c = self.crop_size
+        full = inp.shape[1]
+        if c < full:
+            if self.train:                       # random sub-crop
+                o = np.random.randint(0, full - c + 1, size=3)
+            else:                                # deterministic centre crop
+                o = np.full(3, (full - c) // 2)
+            sl = (slice(o[0], o[0] + c), slice(o[1], o[1] + c),
+                  slice(o[2], o[2] + c))
+            inp, tgt, state = inp[(slice(None),) + sl], tgt[sl], state[sl]
+
+        return (torch.from_numpy(inp), torch.from_numpy(tgt),
+                torch.from_numpy(state.astype(np.int64)))
+
+
+# ── slice visualisation ───────────────────────────────────────────────────────
+
+def slice_figure(inp_sdf, pred, tgt, state, path: Path):
+    """Middle-z cross-section: input SDF | prediction | GT | state."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    k = inp_sdf.shape[-1] // 2
+    fig, axes = plt.subplots(1, 4, figsize=(16, 4.2))
+    panels = [(inp_sdf[..., k], "input SDF (partial)", "coolwarm", (-1, 1)),
+              (pred[..., k],    "predicted SDF",       "coolwarm", (-0.5, 0.5)),
+              (tgt[..., k],     "GT SDF",              "coolwarm", (-0.5, 0.5)),
+              (state[..., k],   "state (0=unobs 1=free 2=surf 3=occ)",
+               "viridis", (0, 3))]
+    for ax, (img, title, cmap, (lo, hi)) in zip(axes, panels):
+        im = ax.imshow(img.T, origin="lower", cmap=cmap, vmin=lo, vmax=hi)
+        ax.set_title(title, fontsize=9)
+        ax.axis("off")
+        fig.colorbar(im, ax=ax, fraction=0.046)
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
+    return path
+
+
+# ── train / eval loops ────────────────────────────────────────────────────────
+
+def run_val(model, loader, device, max_batches=None):
+    model.eval()
+    losses, sample = [], None
+    with torch.no_grad():
+        for bi, (inp, tgt, state) in enumerate(loader):
+            if max_batches and bi >= max_batches:
+                break
+            inp, tgt, state = inp.to(device), tgt.to(device), state.to(device)
+            pred = model(inp)
+            losses.append(masked_l1_loss(pred, tgt, state).item())
+            if sample is None:
+                sample = (inp[0, 0].cpu().numpy(), pred[0, 0].cpu().numpy(),
+                          tgt[0].cpu().numpy(), state[0].cpu().numpy())
+    model.train()
+    return float(np.mean(losses)), sample
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--data_dir", default="data/completer_crops")
+    p.add_argument("--device", default="mps", choices=["mps", "cuda", "cpu"])
+    p.add_argument("--epochs", type=int, default=50)
+    p.add_argument("--batch_size", type=int, default=4)
+    p.add_argument("--crop_size", type=int, default=96)
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--weight_decay", type=float, default=1e-4)
+    p.add_argument("--num_workers", type=int, default=2)
+    p.add_argument("--ckpt_dir", default="checkpoints")
+    p.add_argument("--fast_dev_run", action="store_true",
+                   help="limit to 8 train / 2 val batches per epoch")
+    p.add_argument("--no_wandb", action="store_true")
+    args = p.parse_args()
+
+    device = torch.device(args.device)
+    data_dir = Path(args.data_dir)
+    ckpt_dir = Path(args.ckpt_dir)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    train_ds = CompleterCropDataset(data_dir / "train", args.crop_size, train=True)
+    val_ds   = CompleterCropDataset(data_dir / "val",   args.crop_size, train=False)
+    pin = args.device == "cuda"
+    train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                          num_workers=args.num_workers, pin_memory=pin,
+                          drop_last=True)
+    val_dl   = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
+                          num_workers=args.num_workers, pin_memory=pin)
+    print(f"data: {len(train_ds)} train / {len(val_ds)} val crops @ "
+          f"{args.crop_size}³, device {device}")
+
+    model = OccluSynthCompleter().to(device)
+    n_params = sum(p_.numel() for p_ in model.parameters())
+    print(f"model: {n_params/1e6:.2f}M params")
+
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr,
+                            weight_decay=args.weight_decay)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
+
+    wb = None
+    if not args.no_wandb:
+        import wandb
+        if not (os.environ.get("WANDB_API_KEY") or
+                (Path.home() / ".netrc").exists()):
+            os.environ.setdefault("WANDB_MODE", "offline")
+        wb = wandb.init(project="occlusynth-completer", config=vars(args))
+        print(f"wandb: mode={wb.settings.mode}")
+
+    best_val = float("inf")
+    step = 0
+    max_train_b = 8 if args.fast_dev_run else None
+    max_val_b   = 2 if args.fast_dev_run else None
+
+    for epoch in range(args.epochs):
+        t0 = time.time()
+        ep_losses = []
+        for bi, (inp, tgt, state) in enumerate(train_dl):
+            if max_train_b and bi >= max_train_b:
+                break
+            inp, tgt, state = inp.to(device), tgt.to(device), state.to(device)
+            loss = masked_l1_loss(model(inp), tgt, state)
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            opt.step()
+            ep_losses.append(loss.item())
+            step += 1
+            if step % 10 == 0:
+                if wb:
+                    wb.log({"train/loss": loss.item(),
+                            "train/lr": sched.get_last_lr()[0]}, step=step)
+                print(f"  e{epoch} s{step}: train {loss.item():.4f}")
+        sched.step()
+
+        val_loss, sample = run_val(model, val_dl, device, max_val_b)
+        if args.device == "mps":
+            torch.mps.empty_cache()
+
+        slice_path = slice_figure(*sample,
+                                  ckpt_dir / "slices" / f"epoch{epoch:03d}.png")
+        if wb:
+            import wandb
+            wb.log({"val/loss": val_loss,
+                    "val/slice": wandb.Image(str(slice_path))}, step=step)
+        print(f"epoch {epoch}: train {np.mean(ep_losses):.4f}  "
+              f"val {val_loss:.4f}  ({time.time()-t0:.0f}s)")
+
+        ckpt = {"model": model.state_dict(), "epoch": epoch,
+                "val_loss": val_loss, "config": vars(args)}
+        if val_loss < best_val:
+            best_val = val_loss
+            torch.save(ckpt, ckpt_dir / "completer_best.pt")
+            print(f"  ↑ new best val {val_loss:.4f} → completer_best.pt")
+        if (epoch + 1) % 10 == 0:
+            torch.save(ckpt, ckpt_dir / f"completer_epoch{epoch+1:03d}.pt")
+
+    if wb:
+        wb.finish()
+    print(f"done. best val {best_val:.4f}")
+
+
+if __name__ == "__main__":
+    main()

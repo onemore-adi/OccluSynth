@@ -12,8 +12,8 @@ build/
 venv/
 *.egg
 
-# Data & model weights (too large for git)
-data/
+# Data & model weights (too large for git — ScanNet frames, not source code)
+/data/
 # external VGGT-Omega dependency — clone separately (see docs/architecture.md)
 vggt/
 
@@ -38,3 +38,5 @@ demo_outputs/
 # Secrets / env
 .env
 *.key
+/checkpoints/
+/wandb/
