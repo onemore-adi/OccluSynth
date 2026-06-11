@@ -8,6 +8,15 @@ from .depth_calibration import (
     resize_to_gt,
 )
 from .adapter import DepthAdapter
+from .completer import OccluSynthCompleter, masked_l1_loss
+from .metric_grounding import (
+    fit_metric_depth,
+    apply_metric_correction,
+    eval_scene,
+    ground_scene,
+    save_grounding,
+    load_grounding,
+)
 
 __all__ = [
     "VGGTWrapper",
@@ -18,4 +27,12 @@ __all__ = [
     "evaluate",
     "resize_to_gt",
     "DepthAdapter",
+    "OccluSynthCompleter",
+    "masked_l1_loss",
+    "fit_metric_depth",
+    "apply_metric_correction",
+    "eval_scene",
+    "ground_scene",
+    "save_grounding",
+    "load_grounding",
 ]
