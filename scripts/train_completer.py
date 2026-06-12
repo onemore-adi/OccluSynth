@@ -37,15 +37,48 @@ from occlusynth.models.completer import (OccluSynthCompleter, masked_l1_loss,
 
 # ── data ──────────────────────────────────────────────────────────────────────
 
-class CompleterCropDataset(Dataset):
-    """96³ .npz crops; optionally sub-crops to a smaller cube (debug runs)."""
+def augment_crop(inp: np.ndarray, tgt: np.ndarray, state: np.ndarray,
+                 k: int, f: int):
+    """
+    Apply one of 8 gravity-preserving variants: k yaw rotations (90° about
+    the z axis) then an optional x-flip — the dihedral group D4 in the
+    horizontal plane (an x-flip composed with rotations also yields y-flips).
 
-    def __init__(self, crop_dir: Path, crop_size: int = 96, train: bool = True):
+    The z axis is NEVER transformed: flipping z would put ceilings below
+    floors, and the completer's job is exploiting gravity-aligned priors
+    (floors continue under tables).  SDF values are invariant under these
+    isometries, so all four arrays are only permuted, never rescaled.
+
+    Crop axis order is (x, y, z) — z last; input carries a leading channel
+    axis.  All arrays MUST receive the identical transform in the same call:
+    an input/target orientation mismatch still trains to a decreasing loss
+    while learning garbage.
+    """
+    def t(a, ax_x, ax_y):
+        a = np.rot90(a, k, axes=(ax_x, ax_y))
+        if f:
+            a = np.flip(a, axis=ax_x)
+        return a
+
+    return t(inp, 1, 2), t(tgt, 0, 1), t(state, 0, 1)
+
+
+class CompleterCropDataset(Dataset):
+    """96³ .npz crops; optionally sub-crops to a smaller cube (debug runs).
+
+    ``augment`` enables the 8-variant yaw/flip augmentation — train only:
+    it is force-disabled when ``train=False`` so val arrays stay
+    byte-identical across runs and every val number remains comparable.
+    """
+
+    def __init__(self, crop_dir: Path, crop_size: int = 96,
+                 train: bool = True, augment: bool = False):
         self.files = sorted(Path(crop_dir).glob("*.npz"))
         if not self.files:
             raise FileNotFoundError(f"no .npz crops in {crop_dir}")
         self.crop_size = crop_size
         self.train = train
+        self.augment = augment and train
 
     def __len__(self):
         return len(self.files)
@@ -67,8 +100,14 @@ class CompleterCropDataset(Dataset):
                   slice(o[2], o[2] + c))
             inp, tgt, state = inp[(slice(None),) + sl], tgt[sl], state[sl]
 
-        return (torch.from_numpy(inp), torch.from_numpy(tgt),
-                torch.from_numpy(state.astype(np.int64)))
+        if self.augment:
+            inp, tgt, state = augment_crop(inp, tgt, state,
+                                           k=np.random.randint(4),
+                                           f=np.random.randint(2))
+
+        return (torch.from_numpy(np.ascontiguousarray(inp)),
+                torch.from_numpy(np.ascontiguousarray(tgt)),
+                torch.from_numpy(np.ascontiguousarray(state.astype(np.int64))))
 
 
 # ── slice visualisation ───────────────────────────────────────────────────────
@@ -128,9 +167,15 @@ def main():
     p.add_argument("--weight_decay", type=float, default=1e-4)
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--ckpt_dir", default="checkpoints")
+    p.add_argument("--augment", action="store_true",
+                   help="train-only 8-variant augmentation: 4 yaw rotations × "
+                        "2 horizontal flips (never z — preserves gravity)")
     p.add_argument("--fast_dev_run", action="store_true",
                    help="limit to 8 train / 2 val batches per epoch")
     p.add_argument("--no_wandb", action="store_true")
+    p.add_argument("--init_from", default=None,
+                   help="checkpoint to warm-start model weights from "
+                        "(optimizer/scheduler restart fresh)")
     args = p.parse_args()
 
     device = torch.device(args.device)
@@ -138,8 +183,10 @@ def main():
     ckpt_dir = Path(args.ckpt_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    train_ds = CompleterCropDataset(data_dir / "train", args.crop_size, train=True)
-    val_ds   = CompleterCropDataset(data_dir / "val",   args.crop_size, train=False)
+    train_ds = CompleterCropDataset(data_dir / "train", args.crop_size,
+                                    train=True, augment=args.augment)
+    val_ds   = CompleterCropDataset(data_dir / "val",   args.crop_size,
+                                    train=False, augment=False)
     pin = args.device == "cuda"
     train_dl = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                           num_workers=args.num_workers, pin_memory=pin,
@@ -147,11 +194,17 @@ def main():
     val_dl   = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
                           num_workers=args.num_workers, pin_memory=pin)
     print(f"data: {len(train_ds)} train / {len(val_ds)} val crops @ "
-          f"{args.crop_size}³, device {device}")
+          f"{args.crop_size}³, device {device}, "
+          f"augment={'on (train only)' if args.augment else 'off'}")
 
     model = OccluSynthCompleter().to(device)
     n_params = sum(p_.numel() for p_ in model.parameters())
     print(f"model: {n_params/1e6:.2f}M params")
+    if args.init_from:
+        ck = torch.load(args.init_from, map_location="cpu", weights_only=False)
+        model.load_state_dict(ck["model"])
+        print(f"warm start: {args.init_from} "
+              f"(epoch {ck.get('epoch')}, val {ck.get('val_loss'):.4f})")
 
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr,
                             weight_decay=args.weight_decay)
