@@ -157,7 +157,21 @@ from UNOBSERVABLE (out of frustum → leave alone).
 - Outputs: voxel PLY + Rerun `.rrd` + cross-section PNG (`docs/images/visibility_*.png`)
 - Green=free, red=surface (solid), amber=occluded (what the robot imagines). Pinned in `tests/test_visibility.py` (8 tests).
 
-### 2. 3D Voxel Completer
+### 2. 3D Voxel Completer — IN PROGRESS (code complete, awaiting A100 run)
+- ✓ `mesh_to_tsdf()` (`src/occlusynth/fusion/mesh_to_tsdf.py`) — GT SDF on the
+  fused grid's origin/dims; alignment on scene0000_00: median |GT SDF| at
+  surface voxels 2.51 cm, 93% within 1.5 voxels. `tests/test_mesh_to_tsdf.py`.
+- ✓ 418 train / 90 val crops (`scripts/generate_completer_data.py`,
+  `data/completer_crops/`); scene0471_01 + 5 train scenes yield 0 crops
+  (observed region too small for the ≥10% occluded rule).
+- ✓ `OccluSynthCompleter` 14.7M-param 3D U-Net + masked L1
+  (`src/occlusynth/models/completer.py`, `tests/test_completer.py`).
+- ✓ `scripts/train_completer.py` — MPS debug gate passed (2 epochs, loss ↓).
+  96³ b=4 fits MPS memory but ~70 s/step → cloud A100 required for the real run:
+  `python scripts/train_completer.py --device cuda --epochs 50 --batch_size 4 --crop_size 96`
+- ✓ `scripts/eval_completer.py` — baselines + surface/occluded split, validated
+  end-to-end; `scripts/upload_completer_hf.py` ready (needs HF token).
+
 Input: (sdf, weight, p_observed) voxel grid, 96³ crops, 3 channels
 Output: completed SDF over the full crop
 Loss: L1(sdf_pred, sdf_gt) masked to (state==SURFACE or state==OCCLUDED),
