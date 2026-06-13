@@ -2,7 +2,7 @@
 
 Status document for the completer chapter. For project-wide context see
 repo-root `context.md`; for design rationale see `docs/architecture.md`.
-Last updated: 2026-06-12 (evening — interim local training in progress).
+Last updated: 2026-06-13 (interim training complete, eval done, checkpoint on HF).
 
 ## What is being built
 
@@ -38,10 +38,10 @@ Data:   40 train scenes × random 96³ crops with ≥10% occluded voxels
 | Training script | `scripts/train_completer.py` | ✅ MPS debug gate passed (2 epochs, no OOM, loss ↓) |
 | Eval script | `scripts/eval_completer.py` | ✅ pipeline validated end-to-end with debug ckpt |
 | HF upload script | `scripts/upload_completer_hf.py` | ✅ written; needs `hf auth login` |
-| Interim local training (64³, 50 ep, MPS) | → `checkpoints/interim_64/` | 🔄 running (val 0.216 → 0.172 by epoch 10, ~6.2 min/epoch) |
-| **Cloud A100 run (96³, 50 ep)** | RunPod | ⬜ **blocked on user** |
-| Final eval table + per-scene .rrd | `demo_outputs/completer_eval/` | ⬜ after training |
-| Checkpoint → HF `onemore-adi/occlusynth-completer` | | ⬜ after training |
+| Interim local training (64³, aug, 35 ep, MPS) | `checkpoints/interim_64_aug/completer_best.pt` | ✅ done — best val 0.1857 (ep 32) |
+| Final eval table + per-scene .rrd | `demo_outputs/completer_eval/` | ✅ done — completer beats both baselines |
+| Checkpoint → HF `onemore-adi/occlusynth-completer` | | ✅ done |
+| **Cloud A100 run (96³, 50 ep)** | RunPod | ⬜ **blocked on user** (will improve numbers) |
 
 ## Key implementation facts
 
@@ -112,7 +112,8 @@ Data:   40 train scenes × random 96³ crops with ≥10% occluded voxels
 - [x] 400+ train crops generated, val crops generated
 - [x] `OccluSynthCompleter` forward pass tested
 - [x] Training loss decreasing after 2 local debug epochs
-- [ ] Full 50-epoch run complete on cloud GPU
-- [ ] Eval table showing improvement over both baselines on occluded voxels
-- [ ] One Rerun `.rrd` per (croppable) val scene in `demo_outputs/completer_eval/`
-- [ ] `checkpoints/completer_best.pt` uploaded to HF as `onemore-adi/occlusynth-completer`
+- [x] Training loss decreasing after 2 local debug epochs
+- [x] Eval table showing improvement over both baselines on occluded voxels (64³ interim: occluded MAE 45.27 → 27.14 cm, completion ratio 6.1% → 34.9%)
+- [x] One Rerun `.rrd` per (croppable) val scene in `demo_outputs/completer_eval/`
+- [x] Checkpoint uploaded to HF as `onemore-adi/occlusynth-completer`
+- [ ] Full 50-epoch 96³ run complete on cloud GPU (improves numbers further)

@@ -118,17 +118,20 @@ Estimated effort: 2–3 days.  **Not required for hackathon MVP.**
 ## Depth Scale
 
 VGGT-Omega outputs depth in an arbitrary internal scale.  Baseline measurement
-on scene0000_00 (6 frames, GT depth from ScanNet):
+on scene0000_00 (6 frames, 500 anchors, GT depth at **382×512** colour-camera
+frame via ScanNetDataset):
 
 | Metric | Value |
 |--------|-------|
-| Mean scale factor (pred × k = metres) | **7.39** |
-| Std across frames | 0.48 |
-| Mean median absolute relative error (after scale) | **0.029** (2.9 %) |
+| Global scale factor (pred × k = metres) | **7.40** |
+| Per-frame RANSAC scale mean ± std | **6.81 ± 0.47** |
+| Per-frame RANSAC mean ARE | **0.024** (2.4 %) |
+| Per-frame RANSAC mean RMSE | **0.083 m** |
+| Per-frame RANSAC δ<1.25 | **99.7 %** |
 
-The adapter's primary supervised signal is learning this `k` correction per
-scene, together with the occlusion mask.  ARE of 2.9 % is the **"before
-adapter"** baseline; the adapter should reduce this further.
+Numbers are regression-pinned in `tests/test_metric_grounding.py`.
+The adapter's supervised signal is replacing the closed-form RANSAC fit with
+a learned predictor.  ARE of 2.4 % is the **"before adapter"** baseline.
 
 ---
 
@@ -139,8 +142,138 @@ adapter"** baseline; the adapter should reduce this further.
 | Voxel size | 5 cm | Matches ScanNet annotation resolution |
 | SDF truncation | 4 × voxel = 20 cm | Standard 4× rule |
 | Depth max | 3.5 m | Reliable range of Kinect v1 sensor |
-| Depth scale | 7.39 × (learned) | VGGT internal → metres |
+| Depth scale | ~7.4 × per-frame RANSAC | VGGT internal → metres |
 | Pose source | ScanNet GT (`pose/*.txt`) | See §Camera Pose Strategy |
+
+Two fusion paths in `src/occlusynth/fusion/tsdf.py`:
+- `fuse()` — surface reconstruction (open3d marching-cubes mesh on `.venv312`; numpy point-cloud fallback)
+- `fuse_visibility()` — visibility-aware dense voxel grid (below)
+
+---
+
+## Visibility-Aware Voxel Grid
+
+`fuse_visibility()` builds a dense 5 cm grid over the scene bbox (camera centres +
+back-projected surfaces + 15 cm pad) with three per-voxel channels: **sdf**,
+**weight**, **p_observed**.
+
+**Integration is projective** — the analytic, vectorised equivalent of per-pixel
+DDA ray-casting. For every voxel we project its centre into each camera and
+compare its camera-Z against the measured depth at that pixel:
+
+| Condition | Meaning | Action |
+|-----------|---------|--------|
+| `sdf = d − z > +trunc_eff` | voxel in front of surface | **free** evidence (ray passes through) |
+| `\|sdf\| ≤ trunc_eff` | voxel straddles surface | TSDF update + **surface** evidence |
+| `sdf < −trunc_eff` | voxel behind surface | **occluded** evidence (this frame) |
+| projects outside image / behind camera / onto invalid pixel | no observation | no evidence |
+
+**Obliquity correction (important).** `sdf = d − z` is measured along the optical
+axis, so a fixed band `|sdf| ≤ trunc` balloons in world space for surfaces viewed
+off-normal — stretched by 1/cosθ, a grazing wall becomes ~0.5 m of false surface,
+stealing voxels from free/occluded supervision and teaching a completer that walls
+are half a metre thick. We **cosine-tighten** the band per voxel:
+`trunc_eff = surface_trunc · |n·r̂|` (clamped to ≥ 0.5), with `surface_trunc = 2 ×
+voxel = 10 cm` and `n` the local depth-map normal. Tightening only ever *removes*
+voxels from the surface band, so noisy depth-normals are safe (worst case = the
+untightened band). Far-wall band on scene0000_00: **25 cm → 15 cm** (5 → 3 voxels);
+surface share of observable volume: **20.7 % → 6.3 %**.
+
+Per voxel we accumulate free / surface / occluded counts across all frames, then
+classify by priority **surface > free > occluded**. The critical distinction:
+
+- **OCCLUDED** — received occluded evidence but never free/surface: inside a
+  frustum yet always behind a measured surface. *These are the completer's
+  inpaint targets.*
+- **UNOBSERVABLE** — zero evidence of any kind: never inside a valid-depth
+  frustum. The completer must **leave these alone** (no information to recover).
+
+`p_observed = (free + surface) / (free + surface + occluded)` ∈ [0, 1] is the soft
+visibility channel; 0 for fully-occluded, undefined→0 for unobservable.
+
+**scene0000_00, 6 GT-depth frames:** free 104.0k · surface 20.1k (**6.3 % of
+observable**) · occluded 194.9k (**61 % of observable**) · unobservable 909.6k.
+
+Run: `.venv312/bin/python scripts/run_visibility.py --scene scene0000_00 --use_gt_depth`
+→ coloured voxel PLY + Rerun `.rrd` + cross-section PNG (`docs/images/visibility_*.png`).
+Green = free, red = surface (solid), amber = occluded (the volume the robot must
+imagine — the planner detours around these). Pinned in `tests/test_visibility.py`.
+
+---
+
+## 3D Voxel Completer
+
+`OccluSynthCompleter` in `src/occlusynth/models/completer.py`.
+
+### The problem it solves
+
+OCCLUDED voxels (in a camera frustum, permanently behind a measured surface)
+never appear in any depth image.  A 2D depth-inpainting network cannot recover
+them — they are not missing pixels, they are missing *rays*.  The completer
+operates in 3D on voxel-grid crops and explicitly targets this class.
+
+### Architecture
+
+Encoder-decoder 3D U-Net with skip connections.
+
+| Component | Detail |
+|---|---|
+| Parameters | **14.7 M** |
+| Input | `(B, 3, D, H, W)` — sdf (normalised), weight, p_observed |
+| Output | `(B, 1, D, H, W)` — completed SDF in metres |
+| Encoder | 4 blocks, channels [32, 64, 128, 256], stride-2 Conv3d |
+| Decoder | 4 blocks, trilinear upsample + skip concat |
+| Norms / act | GroupNorm(8) + GELU |
+| Head | 1×1×1 Conv3d, no activation (unbounded SDF) |
+| Crop size | 96³ at 5 cm |
+
+**Loss:** `masked_l1_loss(pred, target, state)` — L1 on SURFACE ∪ OCCLUDED
+voxels only.  UNOBSERVABLE is excluded entirely.
+
+### Supervision target
+
+GT SDF from `mesh_to_tsdf()` (`src/occlusynth/fusion/mesh_to_tsdf.py`) via
+open3d `RaycastingScene`, sampled on voxel centres
+`origin + (idx + 0.5) * 0.05 m` — the **identical** origin/dims as the
+partial grid from `fuse_visibility()`.
+
+**Alignment gate:** before generating any training data, verified on
+scene0000_00: median |GT SDF| at surface voxels = **2.51 cm** (threshold
+7.5 cm), 93.1% within 1.5 voxels of the GT zero-crossing.
+`test_surface_at_zero_crossing` pins this for regressions.
+
+### Training data
+
+40 train / 10 val ScanNet scenes (deterministic md5 split), 96³ fp16 crops,
+≥10% occluded fraction, rejection for >50% exactly-zero GT SDF (degenerate
+mesh region).  418 train / 90 val crops (~770 MB).  Val crops use a fixed
+seed — byte-identical across regenerations so all val numbers are comparable.
+
+**Augmentation** (train-only, `--augment`): 4 yaw rotations about z × optional
+x-flip = 8 variants (dihedral group D4).  z is never flipped — flipping z
+puts ceilings below floors and poisons the gravity-aligned priors the
+completer must exploit.  All four arrays (3 input channels, target, state)
+receive the identical transform in the same `__getitem__` call; 22 tests pin
+this, including a coordinate-identity test that makes an orientation mismatch
+impossible to hide.
+
+### Evaluation (64³ interim, 35 epochs + augmentation)
+
+| Method | Class | MAE (cm) ↓ | Sign acc ↑ | Compl < 5 cm ↑ |
+|---|---|---|---|---|
+| no_completion (SDF = 0) | surface | 7.65 | 0.432 | 0.509 |
+| no_completion | **occluded** | 45.27 | 0.299 | 0.061 |
+| occluded_as_free (SDF = +0.1) | surface | 7.65 | 0.432 | 0.509 |
+| occluded_as_free | **occluded** | 42.00 | 0.701 | 0.121 |
+| **OccluSynth Completer** | surface | **4.86** | **0.585** | **0.768** |
+| **OccluSynth Completer** | **occluded** | **27.14** | **0.722** | **0.349** |
+
+Completer beats both baselines on every occluded metric; surface columns are
+a sanity check (similar across methods = not breaking observed geometry).
+Full table in `demo_outputs/completer_eval/results.json`.
+
+Scripts: `scripts/generate_completer_data.py`, `scripts/train_completer.py`,
+`scripts/eval_completer.py`.  Checkpoint: `checkpoints/interim_64_aug/completer_best.pt`.
 
 ---
 
@@ -160,12 +293,29 @@ c2w float TXT), `intrinsics_color.txt`, `intrinsics_depth.txt`, `label/`,
 
 ## Baseline (Before Adapter)
 
-Run: `python scripts/scannet_baseline.py`  
-Outputs: `demo_outputs/scannet_baseline/`
+Run: `python scripts/run_scale_fit.py --save_grounding`  
+Multi-scene: `python scripts/run_multi_scene_eval.py --n 10`  
+Results cached in `demo_outputs/multi_scene_eval/results.json`.
 
-Results on scene0000_00, 6 frames, real checkpoint:
+### Single scene (scene0000_00, train split)
 
-- Depth ARE: **0.029** (excellent structure, wrong scale)
-- Depth scale: **7.39×** (stable across frames)
-- Camera ATE: **0.704 m** (unusable for TSDF — use GT poses)
-- Confidence: **1.0–1.73** (model is consistently high-confidence)
+- Depth ARE (per-frame RANSAC): **0.024** | scale **6.81 ± 0.47** | δ<1.25 **99.7%**
+- Camera ATE: **0.704 m** (unusable for TSDF — GT poses used instead)
+
+### Multi-scene validation (10 val scenes, 6 frames each, GT at 382×512)
+
+| Scene | mean ARE ↓ | max ARE ↓ | RMSE (m) ↓ | δ<1.25 ↑ | Scale a | Flag |
+|-------|-----------|---------|----------|--------|---------|------|
+| scene0001_00 | 0.026 | 0.042 | 0.105 | 99.0% | 2.93±0.21 | OK |
+| scene0085_00 | 0.017 | 0.020 | 0.065 | 99.8% | 2.27±0.11 | OK |
+| scene0146_00 | 0.017 | 0.046 | 0.097 | 98.9% | 2.06±0.06 | OK |
+| scene0220_01 | 0.021 | 0.031 | 0.102 | 99.5% | 2.75±0.07 | OK |
+| scene0301_02 | 0.029 | 0.058 | 0.113 | 98.1% | 1.83±0.10 | OK |
+| scene0367_00 | 0.025 | 0.029 | 0.129 | 98.4% | 2.16±0.07 | OK |
+| scene0471_01 | 0.017 | 0.048 | 0.056 | 98.8% | 1.53±0.03 | OK |
+| scene0556_00 | 0.027 | 0.048 | 0.105 | 98.6% | 4.04±0.08 | OK |
+| scene0635_01 | 0.030 | 0.040 | 0.075 | 98.8% | 1.81±0.30 | OK |
+| scene0704_00 | 0.032 | 0.049 | 0.098 | 98.3% | 2.74±0.21 | OK |
+| **Aggregate** | **0.024** | **0.058** | **0.094 m** | **98.8%** | — | 10/10 OK |
+
+No pathological scenes detected. Scale factor `a` varies by scene (1.5–4.1 for val; ~6.8 for scene0000_00) — VGGT's output scale is not normalised across scenes, which is why the adapter must predict per-scene (a, b) rather than using a fixed global scalar. Regression-pinned in `tests/test_multi_scene.py`.

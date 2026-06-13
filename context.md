@@ -157,7 +157,7 @@ from UNOBSERVABLE (out of frustum → leave alone).
 - Outputs: voxel PLY + Rerun `.rrd` + cross-section PNG (`docs/images/visibility_*.png`)
 - Green=free, red=surface (solid), amber=occluded (what the robot imagines). Pinned in `tests/test_visibility.py` (8 tests).
 
-### 2. 3D Voxel Completer — IN PROGRESS (code complete, awaiting A100 run)
+### 2. 3D Voxel Completer ✓ DONE (interim 64³ checkpoint; A100 run improves numbers)
 - ✓ `mesh_to_tsdf()` (`src/occlusynth/fusion/mesh_to_tsdf.py`) — GT SDF on the
   fused grid's origin/dims; alignment on scene0000_00: median |GT SDF| at
   surface voxels 2.51 cm, 93% within 1.5 voxels. `tests/test_mesh_to_tsdf.py`.
