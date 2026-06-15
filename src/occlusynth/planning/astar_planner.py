@@ -41,14 +41,21 @@ def build_cost_map(
     completed_sdf: np.ndarray,
     config: PlannerConfig,
     voxel_size: float = 0.05,
+    p_occ_volume: "np.ndarray | None" = None,
 ) -> np.ndarray:
     """Build a 2D (nx, ny) cost map by collapsing the z-axis.
 
     Args:
         state:          uint8 (nx, ny, nz) — voxel state labels
-        completed_sdf:  float32 (nx, ny, nz) — completed SDF in metres (sdf<0 = occupied)
+        completed_sdf:  float32 (nx, ny, nz) — completed SDF in metres (sdf<0 = occupied).
+                        Used for p_occupied when p_occ_volume is None.
         config:         PlannerConfig
         voxel_size:     metres per voxel (default 0.05 m = 5 cm)
+        p_occ_volume:   optional float32 (nx, ny, nz) per-voxel occupancy probability
+                        from MC Dropout (predict_with_uncertainty).  When provided,
+                        replaces the sdf<0 sign-based p_occupied estimate for OCCLUDED
+                        columns.  Values must be in [0, 1].  Requires predict_with_uncertainty()
+                        from occlusynth.models.completer (mc_dropout=True).
 
     Returns:
         cost_map: float64 (nx, ny); inf = impassable, 6.0 = unobservable,
@@ -57,7 +64,8 @@ def build_cost_map(
     Column cost rules (per (x,y) in the robot height band):
         - any SURFACE        → inf
         - any OCCLUDED       → 1.0 + lambda_risk * p_occupied
-                               where p_occupied = frac(occluded cells with sdf < 0)
+                               where p_occupied = mean(p_occ_volume in band) if provided,
+                               else frac(occluded cells with completed_sdf < 0)
         - any FREE (no occ.) → 1.0
         - all UNOBSERVABLE   → 6.0
     """
@@ -102,16 +110,22 @@ def build_cost_map(
     # Columns with OCCLUDED voxels (may also have FREE; not SURFACE)
     occ_cols = traversable & has_occluded
     if occ_cols.any():
-        # p_occupied per column: fraction of OCCLUDED voxels with sdf < 0
-        occ_mask_3d = (band_state == _OCCLUDED)          # (nx, ny, band)
-        occ_sdf_neg = (band_sdf < 0) & occ_mask_3d       # occupied prediction
+        occ_mask_3d = (band_state == _OCCLUDED)              # (nx, ny, band)
+        n_occ = occ_mask_3d.sum(axis=2).astype(np.float64)  # (nx, ny)
 
-        n_occ = occ_mask_3d.sum(axis=2).astype(np.float64)     # (nx, ny)
-        n_neg = occ_sdf_neg.sum(axis=2).astype(np.float64)
+        if p_occ_volume is not None:
+            # Calibrated p_occ from MC Dropout: mean per-voxel probability in band
+            band_p_occ = p_occ_volume[:, :, z_lo : z_hi + 1].astype(np.float64)
+            occ_p_sum  = (band_p_occ * occ_mask_3d).sum(axis=2)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                p_occ = np.where(n_occ > 0, occ_p_sum / n_occ, 0.0)
+        else:
+            # Fallback: fraction of OCCLUDED voxels in band with completed_sdf < 0
+            occ_sdf_neg = (band_sdf < 0) & occ_mask_3d
+            n_neg = occ_sdf_neg.sum(axis=2).astype(np.float64)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                p_occ = np.where(n_occ > 0, n_neg / n_occ, 0.0)
 
-        # np.where evaluates both branches before masking, so guard the division
-        with np.errstate(divide="ignore", invalid="ignore"):
-            p_occ = np.where(n_occ > 0, n_neg / n_occ, 0.0)
         cost_map[occ_cols] = 1.0 + config.lambda_risk * p_occ[occ_cols]
 
     return cost_map

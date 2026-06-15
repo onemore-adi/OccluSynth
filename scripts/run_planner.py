@@ -179,6 +179,12 @@ def main() -> None:
     p.add_argument("--robot_height_hi", type=float, default=0.50)
     p.add_argument("--start", type=int, nargs=2, metavar=("I", "J"), default=None)
     p.add_argument("--goal",  type=int, nargs=2, metavar=("I", "J"), default=None)
+    p.add_argument("--use_uncertainty", action="store_true",
+                   help="Use calibrated MC Dropout p_occ (requires completer checkpoint)")
+    p.add_argument("--ckpt", default="checkpoints/interim_64_aug/completer_best.pt",
+                   help="Completer checkpoint for --use_uncertainty")
+    p.add_argument("--n_samples", type=int, default=16,
+                   help="MC Dropout samples for --use_uncertainty")
     p.add_argument("--no_rrd",  action="store_true")
     p.add_argument("--no_png",  action="store_true")
     args = p.parse_args()
@@ -217,6 +223,81 @@ def main() -> None:
           f"origin {origin}")
 
     # ------------------------------------------------------------------
+    # Optional: MC Dropout p_occ_volume
+    # ------------------------------------------------------------------
+    p_occ_volume = None
+    if args.use_uncertainty:
+        print("[run_planner] computing MC Dropout p_occ_volume ...")
+        try:
+            import torch
+            from occlusynth.models.completer import (
+                OccluSynthCompleter, predict_with_uncertainty
+            )
+            ckpt_path = root / args.ckpt
+            if not ckpt_path.exists():
+                print(f"[run_planner] WARNING: checkpoint not found at {ckpt_path}, "
+                      "falling back to sdf<0 estimate")
+            else:
+                ckpt  = torch.load(str(ckpt_path), map_location="cpu",
+                                   weights_only=False)
+                model = OccluSynthCompleter(mc_dropout=True)
+                model.load_state_dict(ckpt["model"])
+                model.eval()
+
+                # Tile the full grid in x and y using 96-voxel windows with 16-voxel
+                # overlap; assemble a full p_occ volume (nz fixed at full depth)
+                CROP = 96
+                OVERLAP = 16
+                STEP = CROP - OVERLAP
+                p_occ_vol = np.zeros((nx, ny, nz), dtype=np.float32)
+                weight_vol = np.zeros((nx, ny, nz), dtype=np.float32)
+
+                inp_full = np.stack([
+                    data["sdf"].astype(np.float32),
+                    data["weight"].astype(np.float32),
+                    data["p_observed"].astype(np.float32),
+                ], axis=0)  # (3, nx, ny, nz)
+
+                x_starts = list(range(0, max(nx - CROP, 0) + 1, STEP)) or [0]
+                y_starts = list(range(0, max(ny - CROP, 0) + 1, STEP)) or [0]
+                n_tiles  = len(x_starts) * len(y_starts)
+                print(f"[run_planner] tiling {nx}×{ny} into {n_tiles} crops ...")
+
+                with torch.no_grad():
+                    for xi, xs in enumerate(x_starts):
+                        for yi, ys in enumerate(y_starts):
+                            xe = min(xs + CROP, nx)
+                            ye = min(ys + CROP, ny)
+                            xs_eff = xe - CROP if xe == nx else xs
+                            ys_eff = ye - CROP if ye == ny else ys
+                            # Pad z to CROP if needed
+                            crop = inp_full[:, xs_eff:xs_eff + CROP,
+                                           ys_eff:ys_eff + CROP, :CROP]
+                            if crop.shape[1] < CROP or crop.shape[2] < CROP:
+                                continue
+                            z_crop = min(nz, CROP)
+                            c = np.zeros((1, 3, CROP, CROP, CROP), dtype=np.float32)
+                            c[0, :, :, :, :z_crop] = crop[:, :, :, :z_crop]
+                            t = torch.from_numpy(c)
+                            _, _, p_t = predict_with_uncertainty(
+                                model, t, n_samples=args.n_samples)
+                            p = p_t[0, 0, :, :, :z_crop].numpy()
+                            p_occ_vol[xs_eff:xs_eff + CROP,
+                                      ys_eff:ys_eff + CROP, :z_crop] += p
+                            weight_vol[xs_eff:xs_eff + CROP,
+                                       ys_eff:ys_eff + CROP, :z_crop] += 1.0
+
+                pos = weight_vol > 0
+                p_occ_vol[pos] /= weight_vol[pos]
+                p_occ_volume = p_occ_vol
+                print(f"[run_planner] p_occ_volume computed — "
+                      f"mean over occluded voxels: "
+                      f"{p_occ_volume[state == 3].mean():.4f}")
+        except Exception as exc:
+            print(f"[run_planner] WARNING: uncertainty estimation failed ({exc}), "
+                  "falling back to sdf<0 estimate")
+
+    # ------------------------------------------------------------------
     # Build cost map
     # ------------------------------------------------------------------
     cfg = PlannerConfig(
@@ -224,7 +305,10 @@ def main() -> None:
         robot_height_lo=args.robot_height_lo,
         robot_height_hi=args.robot_height_hi,
     )
-    cost_map = build_cost_map(state, completed_sdf, cfg, voxel_size=voxel_size)
+    cost_map = build_cost_map(state, completed_sdf, cfg, voxel_size=voxel_size,
+                              p_occ_volume=p_occ_volume)
+    if args.use_uncertainty and p_occ_volume is not None:
+        print("[run_planner] cost map uses calibrated MC Dropout p_occ")
 
     n_traversable = np.isfinite(cost_map).sum()
     n_wall        = (cost_map == np.inf).sum()

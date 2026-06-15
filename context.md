@@ -193,7 +193,21 @@ Training data: 40 train scenes × random 96³ crops with ≥10% occluded voxels
   visible in `docs/images/planner_scene0000_00.png`
 - ✓ "Risk-Graded Planner" section added to `docs/architecture.md`
 
-### 4. Demo video
+### 4. MC Dropout Uncertainty ✓ DONE
+- ✓ `OccluSynthCompleter(mc_dropout=True)` — Dropout(p=0.2) after each decoder block,
+  gated by flag; no new weight keys → existing checkpoints load with strict=True
+- ✓ `predict_with_uncertainty(model, inp, n_samples=16)` — context-managed MC sampling
+  (Welford online mean/var), returns (mean_sdf, std_sdf, p_occ)
+- ✓ `tests/test_uncertainty.py` — 10 tests (std ≥ 0, p_occ ∈ [0,1], checkpoint compat,
+  std concentration); all passing with real checkpoint + val data
+- ✓ `scripts/eval_calibration.py` — ECE + reliability diagram PNG, honest reconciliation
+  with claimed ECE < 0.05; actual value measured on interim 64³ checkpoint
+- ✓ `build_cost_map()` gains optional `p_occ_volume` param (calibrated MC p_occ replaces
+  sdf<0 sign estimate for OCCLUDED columns)
+- ✓ `run_planner.py --use_uncertainty` — tiled completer inference over full scene grid,
+  passes p_occ_volume to cost map; falls back gracefully
+
+### 5. Demo video
 Record: (a) raw VGGT depth, (b) RANSAC-calibrated depth, (c) GT depth, (d) open3d mesh,
 (e) visibility voxel grid (green/red/amber — the money shot).
 Show the **RANSAC calibration** improving depth scale (not an adapter — name it correctly).

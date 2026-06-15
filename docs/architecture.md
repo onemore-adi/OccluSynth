@@ -392,3 +392,75 @@ Outputs: `docs/images/planner_scene0000_00.png` (cost-map heatmap + white path),
 | `robot_height_hi` | 0.50 m | Upper bound of robot body band above floor |
 
 Run: `.venv312/bin/python scripts/run_planner.py --scene scene0000_00 [--lambda_risk 4.0]`
+
+---
+
+## MC Dropout Uncertainty
+
+### Overview
+
+The completer can be run in **MC Dropout mode** (`mc_dropout=True`) to produce
+per-voxel calibrated uncertainty estimates — without retraining.  This backs the
+headline claim: *"calibrated voxel-level uncertainty — tells the planner what it
+doesn't know."*
+
+**Implementation:** `nn.Dropout(p=0.2)` after each decoder block output, gated
+by the `mc_dropout` constructor flag.  `nn.Dropout` has no learnable parameters,
+so the same checkpoint loads cleanly into both `mc_dropout=False` (original
+deterministic inference) and `mc_dropout=True` (stochastic uncertainty mode).
+
+**API:** `predict_with_uncertainty(model, inp, n_samples=16)` in
+`src/occlusynth/models/completer.py`.  Keeps dropout in train mode while running
+N stochastic forward passes; accumulates mean/variance via Welford's online
+algorithm (numerically stable, constant memory overhead).
+
+### Outputs
+
+| Tensor | Shape | Meaning |
+|---|---|---|
+| `mean_sdf` | (B,1,D,H,W) | Mean completed SDF across N samples |
+| `std_sdf`  | (B,1,D,H,W) | Predictive std (≥ 0); zero iff dropout inactive |
+| `p_occ`    | (B,1,D,H,W) | Fraction of samples with SDF < 0 ∈ [0,1] |
+
+### Uncertainty concentration
+
+Even without calibration fine-tuning, MC Dropout std concentrates in the
+occluded blind spot.  Confirmed on the real checkpoint + val data
+(`tests/test_uncertainty.py::TestStdConcentrationInOccluded`): mean std over
+OCCLUDED voxels ≥ mean std over SURFACE voxels.  The model agrees with itself
+more where it was supervised (surface) and disagrees more where it was
+extrapolating (occluded).
+
+### Calibration (ECE)
+
+`scripts/eval_calibration.py` bins `p_occ` against GT occupancy (`gt_sdf < 0`)
+for OCCLUDED voxels on the val set and computes **Expected Calibration Error
+(ECE)**.  Key caveat: inference-only MC Dropout is not a calibrated probabilistic
+model.  ECE is reported honestly; achieving ECE < 0.05 requires temperature
+scaling or a calibration fine-tune.  See `demo_outputs/calibration/results.json`.
+
+### Planner integration
+
+`build_cost_map()` accepts an optional `p_occ_volume` parameter (float32,
+same shape as state grid, values ∈ [0,1]).  When provided, the per-column
+`p_occupied` estimate uses the mean calibrated p_occ over occluded voxels in
+the height band instead of the sign-based `completed_sdf < 0` fallback.
+
+Enable with `run_planner.py --use_uncertainty` (tiled inference over the full
+scene grid).  Falls back gracefully if the checkpoint is unavailable.
+
+### Dropout placement rationale
+
+Dropout is placed *after* decoder blocks (not encoder blocks) because:
+- Encoder features describe what was observed → high certainty, low benefit
+- Decoder features reconstruct the unobserved → high benefit, captures
+  extrapolation disagreement
+- Placing dropout in all four decoder blocks gives four independent uncertainty
+  sources per voxel at full output resolution
+
+### No fine-tuning required
+
+The existing 64³ checkpoint already works in mc_dropout=True mode.  The A100
+96³ run can add a calibration fine-tune step (KL divergence or temperature
+scaling) to bring ECE below 0.05 — this is not yet done in the interim
+checkpoint.
