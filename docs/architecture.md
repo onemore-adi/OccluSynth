@@ -319,3 +319,76 @@ Results cached in `demo_outputs/multi_scene_eval/results.json`.
 | **Aggregate** | **0.024** | **0.058** | **0.094 m** | **98.8%** | — | 10/10 OK |
 
 No pathological scenes detected. Scale factor `a` varies by scene (1.5–4.1 for val; ~6.8 for scene0000_00) — VGGT's output scale is not normalised across scenes, which is why the adapter must predict per-scene (a, b) rather than using a fixed global scalar. Regression-pinned in `tests/test_multi_scene.py`.
+
+---
+
+## Risk-Graded Planner
+
+### Overview
+
+The planner converts the completed 3D voxel grid into a 2D floor-plan cost map and
+finds the minimum-cost path using 8-connected A*. Risk is derived directly from
+the completed SDF — no Habitat-Sim, no navigation mesh, no prebuilt map.
+
+**Source:** `src/occlusynth/planning/astar_planner.py`
+**Script:** `scripts/run_planner.py`
+**Tests:** `tests/test_planner.py` (18 tests)
+
+### Cost map construction
+
+The 3D state grid (axes: x, y, z with z = vertical/gravity) is collapsed to
+a 2D floor-plan (nx, ny) by inspecting the **robot height band** — a z-slice
+between `robot_height_lo` and `robot_height_hi` metres above the lowest FREE
+voxel in the grid.  Default band: **0.10–0.50 m**.
+
+Per (x, y) column in the height band:
+
+| Column content | Cost |
+|---|---|
+| Any SURFACE voxel | `inf` — impassable wall |
+| Any OCCLUDED voxel | `1.0 + λ × p_occupied` |
+| Any FREE, no OCCLUDED | `1.0` — confirmed traversable |
+| All UNOBSERVABLE | `6.0` — never in any frustum |
+
+`p_occupied` = fraction of OCCLUDED voxels in the column whose completed
+SDF < 0 (negative SDF = inside the mesh = physically occupied).
+`λ` = `lambda_risk` (default **4.0**).
+
+Monotonicity chain: `1.0 ≤ 1.0+λ·p_occ ≤ 5.0 < 6.0 < inf`.
+A fully-occluded worst-case column (λ=4, p=1) costs 5.0 — still cheaper
+than unknown (6.0) because at least we have a prediction.
+
+### A* search
+
+8-connected grid search.  Edge cost = move distance × destination cell cost
+(diagonal move = √2 × cost; cardinal = 1 × cost).
+Heuristic = Euclidean distance in voxel units (admissible: min finite cost ≥ 1.0).
+
+Default start/goal: `farthest_free_pair()` — double-BFS over the traversable
+subgraph (hop-count diameter approximation).  Override with `--start I J --goal I J`.
+
+### Results on scene0000_00
+
+```
+Grid 146×153×96  voxel 5 cm
+Traversable cells: 20,538  Wall cells: 1,800
+Start (145,152) → Goal (0,16)
+Path cells   : 244
+Geom length  : 13.56 m
+Path cost    : 673.5
+Occluded cells on path: 91 / 244  (37 %)
+Robot height band: z_idx 26–34  (0.10–0.50 m above floor)
+```
+
+Outputs: `docs/images/planner_scene0000_00.png` (cost-map heatmap + white path),
+`demo_outputs/planner_scene0000_00.rrd` (Rerun 3D viewer).
+
+### Configuration (`PlannerConfig`)
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `lambda_risk` | 4.0 | Risk weight on p_occupied for occluded cells |
+| `robot_height_lo` | 0.10 m | Lower bound of robot body band above floor |
+| `robot_height_hi` | 0.50 m | Upper bound of robot body band above floor |
+
+Run: `.venv312/bin/python scripts/run_planner.py --scene scene0000_00 [--lambda_risk 4.0]`

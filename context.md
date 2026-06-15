@@ -179,7 +179,21 @@ Loss: L1(sdf_pred, sdf_gt) masked to (state==SURFACE or state==OCCLUDED),
 Target: GT SDF voxelized from _vh_clean_2.ply at same 5 cm grid + world origin
 Training data: 40 train scenes × random 96³ crops with ≥10% occluded voxels
 
-### 3. Demo video
+### 3. Risk-Graded Planner ✓ DONE
+- ✓ `src/occlusynth/planning/` subpackage: `PlannerConfig`, `build_cost_map()`,
+  `astar()`, `farthest_free_pair()`, `path_geom_length()`
+- ✓ 2D cost map collapsing z over robot height band (0.10–0.50 m above lowest FREE
+  voxel); columns classified SURFACE→inf, OCCLUDED→1+λ·p_occ, FREE→1, UNOBS→6
+- ✓ 8-connected A* with Euclidean heuristic; edge cost = move_dist × dest_cost
+- ✓ `scripts/run_planner.py` — loads cached SceneGrid, runs planner, saves PNG
+  heatmap + Rerun .rrd
+- ✓ `tests/test_planner.py` — 18 tests covering cost monotonicity, no-blocked-cell
+  on path, start/goal connectivity, regression detour; all passing
+- ✓ End-to-end on scene0000_00 (GT SDF): path 13.56 m / 244 cells; detour clearly
+  visible in `docs/images/planner_scene0000_00.png`
+- ✓ "Risk-Graded Planner" section added to `docs/architecture.md`
+
+### 4. Demo video
 Record: (a) raw VGGT depth, (b) RANSAC-calibrated depth, (c) GT depth, (d) open3d mesh,
 (e) visibility voxel grid (green/red/amber — the money shot).
 Show the **RANSAC calibration** improving depth scale (not an adapter — name it correctly).

@@ -93,8 +93,10 @@ Data:   40 train scenes × random 96³ crops with ≥10% occluded voxels
    on occluded voxels; surface columns should be similar across methods.
 3. **Upload**: `python scripts/upload_completer_hf.py` →
    `onemore-adi/occlusynth-completer` (needs HF token).
-4. **Next chapter**: risk-graded planner — A* over the completed voxel cost
-   map, runs on the reconstruction directly. **No Habitat-Sim.**
+4. **Next chapter: ✅ DONE** — risk-graded planner (`src/occlusynth/planning/`,
+   `scripts/run_planner.py`, `tests/test_planner.py`). A* over the completed
+   voxel cost map; no Habitat-Sim. Results on scene0000_00:
+   path 13.56 m / 244 cells, 91 occluded on path. See `docs/architecture.md §Risk-Graded Planner`.
 
 ## What NOT to do
 
