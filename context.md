@@ -207,7 +207,19 @@ Training data: 40 train scenes × random 96³ crops with ≥10% occluded voxels
 - ✓ `run_planner.py --use_uncertainty` — tiled completer inference over full scene grid,
   passes p_occ_volume to cost map; falls back gracefully
 
-### 5. Demo video
+### 5. Occlusion Safety Benchmark ✓ DONE
+- ✓ `scripts/run_safety_benchmark.py` — scene-level benchmark on all 10 val scenes
+  via tiled completer inference (96×96 tiles); Metric 1 (hazard awareness rate) +
+  Metric 2 (planner collision-avoidance rate); output table + JSON
+- ✓ `tests/test_safety_benchmark.py` — 6 tests (hazards non-empty, fraction plausible,
+  baselines=0 by construction, completer>0 on val crops); all passing
+- ✓ `docs/safety_benchmark.md` — full spec, reproducible split, results table, design
+  rationale (why ScanNet not Habitat-Sim)
+- Results (interim checkpoint): baselines 0.000 awareness (structural), OccluSynth
+  21.3% aggregate awareness; 15.5% collision avoidance on scene0556_00
+- Result in `demo_outputs/safety_benchmark/results.json`
+
+### 6. Demo video
 Record: (a) raw VGGT depth, (b) RANSAC-calibrated depth, (c) GT depth, (d) open3d mesh,
 (e) visibility voxel grid (green/red/amber — the money shot).
 Show the **RANSAC calibration** improving depth scale (not an adapter — name it correctly).

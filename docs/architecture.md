@@ -458,6 +458,39 @@ Dropout is placed *after* decoder blocks (not encoder blocks) because:
 - Placing dropout in all four decoder blocks gives four independent uncertainty
   sources per voxel at full output resolution
 
+---
+
+## Occlusion Safety Benchmark
+
+See `docs/safety_benchmark.md` for full specification and reproducibility details.
+
+### Definition
+
+Hidden hazard = `(state == OCCLUDED) AND (gt_sdf < 0)` — a voxel behind every
+camera view AND inside the GT mesh.  No line-of-sight sensor can detect it;
+a robot passing through would collide.
+
+### Results (interim checkpoint, 10 val scenes, 430k hazard voxels)
+
+| Method | Hazard awareness ↑ | Collision avoidance ↑ |
+|---|---|---|
+| no_completion (SDF = 0) | **0.000** | — |
+| occluded_as_free (SDF = +0.1) | **0.000** | — |
+| **OccluSynth Completer** | **0.213** | 0.155 (best scene) |
+
+Baselines have 0% awareness by construction.
+OccluSynth detects 21.3% of hidden hazards with the interim 64³ checkpoint.
+
+### Why not Habitat-Sim
+
+The architecture.md explicitly rules out Habitat-Sim:
+- Habitat is a *rendering* engine for *simulated* navigation scenes.
+- OccluSynth evaluates on *real* reconstructions from Kinect v1 RGB-D sensors.
+- ScanNet scenes have realistic furniture clutter and complex occluded volumes;
+  simulated scenes are typically convex rooms.
+- The benchmark's claim is "first on *real* occlusion geometry" — using
+  Habitat would make this claim false.
+
 ### No fine-tuning required
 
 The existing 64³ checkpoint already works in mc_dropout=True mode.  The A100
