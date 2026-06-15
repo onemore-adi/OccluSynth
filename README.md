@@ -79,9 +79,52 @@ RGB-D frames + ScanNet GT poses
 
 ## Data
 
+### ScanNet v2 (primary)
+
 Requires ScanNet v2 (non-commercial research licence).
 GT meshes in `data/scannet/scans/<scene>/<scene>_vh_clean_2.ply`.
 RGB-D frames in `data/scannet/tasks/scannet_frames_25k/`.
+
+### 7-Scenes (cross-dataset generalisation probe)
+
+Used in `scripts/run_crossdataset.py` to verify that the frozen
+RANSAC-grounding + visibility-fusion pipeline generalises beyond ScanNet.
+No retraining is required.
+
+**Download** from the [Microsoft Research 7-Scenes page](https://www.microsoft.com/en-us/research/project/rgb-d-dataset-7-scenes/)
+and extract so the layout matches:
+
+```
+data/7scenes/
+  chess/
+    seq-01/
+      frame-000000.color.png   (640×480 RGB)
+      frame-000000.depth.png   (640×480 uint16 mm)
+      frame-000000.pose.txt    (4×4 camera-to-world)
+      frame-000001.color.png
+      …
+    seq-02/
+    …
+  fire/
+    seq-01/
+    …
+```
+
+All 7-Scenes sequences share fixed Kinect v1 intrinsics
+(`fx=fy=585, cx=320, cy=240` at 640×480); no per-sequence calibration
+file is needed.
+
+**Run the cross-dataset probe:**
+
+```bash
+.venv312/bin/python scripts/run_crossdataset.py \
+    --seqs chess/seq-01 fire/seq-01 \
+    --data_root data/7scenes \
+    --n_frames 6
+```
+
+Outputs: `demo_outputs/crossdataset/results.json`,
+`docs/images/crossdataset_chess_seq-01.png`, per-sequence `.rrd`.
 
 ---
 
