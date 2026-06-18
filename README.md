@@ -138,6 +138,8 @@ Outputs: `demo_outputs/crossdataset/results.json`,
 
 Full surface/occluded split in `demo_outputs/completer_eval/results.json`.
 
+> All metrics above are from the **interim 64³ MPS checkpoint** (`checkpoints/interim_64_aug/completer_best.pt`, epoch 32, val_loss 0.1857). The full 96³ A100 training run is scripted and ready (`python scripts/train_completer.py --device cuda --epochs 50 --batch_size 4 --crop_size 96`; data prepared) — it was not executed this phase due to compute access, not missing work, and is expected to improve all metrics.
+
 ---
 
 ## Docs

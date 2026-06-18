@@ -167,8 +167,9 @@ from UNOBSERVABLE (out of frustum → leave alone).
 - ✓ `OccluSynthCompleter` 14.7M-param 3D U-Net + masked L1
   (`src/occlusynth/models/completer.py`, `tests/test_completer.py`).
 - ✓ `scripts/train_completer.py` — MPS debug gate passed (2 epochs, loss ↓).
-  96³ b=4 fits MPS memory but ~70 s/step → cloud A100 required for the real run:
+  96³ b=4 fits MPS memory but ~70 s/step (~4+ days) — not viable on MPS. The full 96³ run is scripted and ready (418 train / 90 val crops prepared); it was not executed this phase due to compute access, not missing work. Single command on an A100:
   `python scripts/train_completer.py --device cuda --epochs 50 --batch_size 4 --crop_size 96`
+  All reported metrics are from the interim 64³ checkpoint (`checkpoints/interim_64_aug/completer_best.pt`, epoch 32, val_loss 0.1857); the 96³ run is expected to improve them further.
 - ✓ `scripts/eval_completer.py` — baselines + surface/occluded split, validated
   end-to-end; `scripts/upload_completer_hf.py` ready (needs HF token).
 

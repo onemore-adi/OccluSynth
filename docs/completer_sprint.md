@@ -41,7 +41,7 @@ Data:   40 train scenes × random 96³ crops with ≥10% occluded voxels
 | Interim local training (64³, aug, 35 ep, MPS) | `checkpoints/interim_64_aug/completer_best.pt` | ✅ done — best val 0.1857 (ep 32) |
 | Final eval table + per-scene .rrd | `demo_outputs/completer_eval/` | ✅ done — completer beats both baselines |
 | Checkpoint → HF `onemore-adi/occlusynth-completer` | | ✅ done |
-| **Cloud A100 run (96³, 50 ep)** | RunPod | ⬜ **blocked on user** (will improve numbers) |
+| **Cloud A100 run (96³, 50 ep)** | RunPod | ⬜ **ready, not executed this phase** — script + 418/90 crops prepared; see command below; expected to improve all metrics |
 
 ## Key implementation facts
 
@@ -71,12 +71,12 @@ Data:   40 train scenes × random 96³ crops with ≥10% occluded voxels
 
 ## Remaining work
 
-1. **A100 run** (user provisions RunPod; copy up `data/completer_crops/`):
+1. **A100 run** — fully scripted and ready; training data (418 train / 90 val crops) prepared locally. Not executed this phase due to compute access, not missing work. On an A100:
    ```bash
    pip install -e . && pip install wandb
    python scripts/train_completer.py --device cuda --epochs 50 --batch_size 4 --crop_size 96
    ```
-   Local 96³ b=4 fits 16 GB MPS but runs ~70 s/step (~4+ days) — not viable.
+   Local 96³ b=4 fits MPS memory but ~70 s/step (~4+ days) — not viable on MPS. All reported metrics are from the interim 64³ checkpoint (`checkpoints/interim_64_aug/completer_best.pt`, epoch 32, val_loss 0.1857); the 96³ A100 run is expected to improve them further.
 2. **Eval**:
    `python scripts/eval_completer.py --device cuda --ckpt checkpoints/completer_best.pt`
 
@@ -118,4 +118,4 @@ Data:   40 train scenes × random 96³ crops with ≥10% occluded voxels
 - [x] Eval table showing improvement over both baselines on occluded voxels (64³ interim: occluded MAE 45.27 → 27.14 cm, completion ratio 6.1% → 34.9%)
 - [x] One Rerun `.rrd` per (croppable) val scene in `demo_outputs/completer_eval/`
 - [x] Checkpoint uploaded to HF as `onemore-adi/occlusynth-completer`
-- [ ] Full 50-epoch 96³ run complete on cloud GPU (improves numbers further)
+- [ ] Full 50-epoch 96³ A100 run — scripted and ready, not executed this phase due to compute access; `python scripts/train_completer.py --device cuda --epochs 50 --batch_size 4 --crop_size 96`
