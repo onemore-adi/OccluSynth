@@ -1,11 +1,11 @@
 # OccluSynth — Occlusion-Aware 3D Scene Reconstruction
 
-- **Problem Statement Number** - `TODO: fill in your problem statement number`
-- **Problem Statement Title** - `TODO: must exactly match one of the 11 Samsung EnnovateX AX Hackathon Problem Statements`
-- **Team name** - `TODO: same as Phase 1 team name`
+- **Problem Statement Number** - 09
+- **Problem Statement Title** - Occlusion-Aware 3D Scene Reconstruction in Partially Observable Real-World Environments
+- **Team name** - onemore_adi
 - **Team members (Names)** - Aditya Agarwal
 - **Institute/College Name** - National Institute of Technology, Rourkela
-- **Final Presentation Google Drive Link** - `TODO: openly-accessible Google Drive PDF link`
+- **Final Presentation Google Drive Link** - [`PDF Drive Link`](https://drive.google.com/file/d/1cRv_bYaVuypEfW7YYF2Wp7zmxNOf7FWG/view?usp=sharing)
 - **Full Submission Demo Video Link** - `TODO: YouTube public/unlisted link (OccluSynth_demo.mp4 — Google Drive not allowed for video)`
 - **Setup & Result Reproducibility Video Link** - `TODO: YouTube public/unlisted link`
 
@@ -31,10 +31,11 @@
 OccluSynth builds on **[VGGT-Omega](https://github.com/facebookresearch/vggt)** (Meta AI) for feed-forward monocular depth/pose prediction. VGGT is used as a frozen, off-the-shelf predictor only.
 
 **New work developed in this project (not in VGGT):**
+
 - Visibility-aware TSDF fusion that labels every voxel `free` / `surface` / `occluded` / `unobservable` (`src/occlusynth/fusion/`)
 - RANSAC metric-grounding to lift VGGT's scale-ambiguous depth to metric scale (`src/occlusynth/models/metric_grounding.py`)
 - The **OccluSynth Completer** — a 3D U-Net that predicts SDF inside occluded volumes (`src/occlusynth/models/`, `scripts/train_completer.py`)
-- A risk-graded A* planner over the completed cost map (`scripts/run_planner.py`)
+- A risk-graded A\* planner over the completed cost map (`scripts/run_planner.py`)
 - Full evaluation harness (geometry, completer, robustness, cross-dataset, safety benchmark)
 
 ---
@@ -136,18 +137,18 @@ MODE=short ./assemble_video.sh      # ~90s cut
 
 ## Key results (64³ interim checkpoint)
 
-| Method | Occluded MAE (cm) ↓ | Occluded sign acc ↑ | Compl < 5 cm ↑ |
-|---|---|---|---|
-| no_completion | 45.27 | 0.299 | 0.061 |
-| occluded_as_free | 42.00 | 0.701 | 0.121 |
-| **OccluSynth Completer** | **27.14** | **0.722** | **0.349** |
+| Method                   | Occluded MAE (cm) ↓ | Occluded sign acc ↑ | Compl < 5 cm ↑ |
+| ------------------------ | ------------------- | ------------------- | -------------- |
+| no_completion            | 45.27               | 0.299               | 0.061          |
+| occluded_as_free         | 42.00               | 0.701               | 0.121          |
+| **OccluSynth Completer** | **27.14**           | **0.722**           | **0.349**      |
 
 Geometry surface/occluded split (`demo_outputs/geometry_eval/results.json`):
 
-| Method | Chamfer L1 ↓ | F-score@5cm ↑ | Occluded F-score ↑ |
-|---|---|---|---|
-| TSDF-only | 3.11 cm | 74.1% | 0.0% (cannot see behind walls) |
-| **OccluSynth** | **1.77 cm** | **83.5%** | **32.0%** |
+| Method         | Chamfer L1 ↓ | F-score@5cm ↑ | Occluded F-score ↑             |
+| -------------- | ------------ | ------------- | ------------------------------ |
+| TSDF-only      | 3.11 cm      | 74.1%         | 0.0% (cannot see behind walls) |
+| **OccluSynth** | **1.77 cm**  | **83.5%**     | **32.0%**                      |
 
 > Metrics are from the **interim 64³ MPS checkpoint** (`checkpoints/interim_64_aug/completer_best.pt`,
 > epoch 32). The full 96³ A100 run is scripted and data-prepared
