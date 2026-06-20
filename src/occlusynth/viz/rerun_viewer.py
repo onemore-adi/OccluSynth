@@ -66,23 +66,41 @@ class RerunViewer:
 
     Usage::
 
-        viewer = RerunViewer("occlusynth")
+        viewer = RerunViewer("occlusynth")                       # spawn GUI
+        viewer = RerunViewer("occlusynth", spawn=False,          # headless → .rrd
+                             save_path="demo_outputs/scene.rrd")
         viewer.log_rgb(stem, rgb_path)
         viewer.log_depth(stem, depth_m, K)
         viewer.log_pointcloud(stem, pts_xyz, pts_rgb)
         viewer.log_camera(stem, c2w, K, (H, W))
+        viewer.log_visibility(result, frames_data)               # green/red/amber
+
+    Open a saved recording later with::  rerun demo_outputs/scene.rrd
     """
 
-    def __init__(self, app_id: str = "occlusynth") -> None:
-        self.app_id   = app_id
-        self._rr      = None
-        self._enabled = False
+    def __init__(
+        self,
+        app_id: str = "occlusynth",
+        spawn: bool = True,
+        save_path: Optional[str] = None,
+    ) -> None:
+        self.app_id    = app_id
+        self.spawn     = spawn
+        self.save_path = save_path
+        self._rr       = None
+        self._enabled  = False
         self._try_init()
 
     def _try_init(self) -> None:
         try:
             import rerun as rr
-            rr.init(self.app_id, spawn=True)
+            rr.init(self.app_id, spawn=self.spawn and self.save_path is None)
+            if self.save_path is not None:
+                from pathlib import Path
+                Path(self.save_path).parent.mkdir(parents=True, exist_ok=True)
+                rr.save(self.save_path)
+                print(f"[RerunViewer] recording → {self.save_path}  "
+                      f"(open with: rerun {self.save_path})")
             self._rr      = rr
             self._enabled = True
         except ImportError:
@@ -156,3 +174,56 @@ class RerunViewer:
                 width=W, height=H,
             ),
         )
+
+    def log_visibility(
+        self,
+        result,
+        frames_data: Optional[list] = None,
+        voxel_size:  float = 0.05,
+        free_subsample: int = 40_000,
+    ) -> None:
+        """
+        Stream a VisibilityResult as three independently-toggleable voxel clouds:
+
+            world/voxels/free      green  — observed empty space
+            world/voxels/surface   red    — measured solid geometry
+            world/voxels/occluded  amber  — hidden, completer inpaint targets
+
+        Toggle FREE off in the Rerun UI to get the money shot: red surfaces with
+        amber occlusion shadows behind them (amber = what the robot must imagine).
+        Camera frusta are logged too.
+        """
+        if not self._enabled:
+            return
+
+        from occlusynth.fusion.tsdf import (
+            FREE, SURFACE, OCCLUDED, CLASS_COLORS,
+        )
+
+        rng    = np.random.default_rng(0)
+        radius = voxel_size * 0.5
+        specs  = [
+            ("free",     FREE,     free_subsample),
+            ("surface",  SURFACE,  None),
+            ("occluded", OCCLUDED, None),
+        ]
+        for name, label, cap in specs:
+            m   = result.labels == label
+            xyz = result.centers[m]
+            if cap is not None and len(xyz) > cap:
+                xyz = xyz[rng.choice(len(xyz), cap, replace=False)]
+            if len(xyz) == 0:
+                continue
+            col = np.array(CLASS_COLORS[label], np.uint8)
+            self._rr.log(
+                f"world/voxels/{name}",
+                self._rr.Points3D(xyz, colors=col, radii=radius),
+            )
+
+        # camera frusta for context
+        if frames_data is not None:
+            for i, fd in enumerate(frames_data):
+                depth = np.asarray(fd["depth_m"])
+                H, W  = depth.shape
+                self.log_camera(f"f{i:02d}", np.asarray(fd["c2w"]),
+                                np.asarray(fd["K"]), (H, W))

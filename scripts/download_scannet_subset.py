@@ -23,17 +23,25 @@ Examples:
     python download_scannet_subset.py --out_dir ./data/scannet --mode scenes \
         --scene_ids scene0011_00 scene0050_00 scene0231_00
 
+    # Mesh-only download (no .sens) — ~50-100 MB/scene, safe to run as background job
+    # Re-runnable: skips existing files, retries failed ones.
+    python download_scannet_subset.py --out_dir ./data/scannet --mode scenes \
+        --file_types _vh_clean_2.ply _vh_clean_2.labels.ply --yes \
+        --scene_ids scene0000_00 scene0020_01 ...
+
 By running this you acknowledge the ScanNet Terms of Use.
 """
 
 import argparse
 import os
+import socket
 import ssl
 import sys
 import urllib.request
 from typing import List
 
 ssl._create_default_https_context = ssl._create_unverified_context
+socket.setdefaulttimeout(60)   # 60s socket timeout — prevents indefinite hangs on stalled TCP
 
 BASE_URL = 'http://kaldir.vc.cit.tum.de/scannet/'
 RELEASE = 'v2/scans'
@@ -67,8 +75,9 @@ def _progress(count, block_size, total_size, label):
     sys.stdout.flush()
 
 
-def download_file(url: str, out_file: str) -> None:
-    """Download with progress + resume-safe via .tmp rename. Skips if file already exists."""
+def download_file(url: str, out_file: str, retries: int = 5) -> None:
+    """Download with progress + resume-safe via .tmp rename. Skips if file already exists.
+    Retries up to `retries` times on connection errors (TUM server drops connections)."""
     os.makedirs(os.path.dirname(out_file), exist_ok=True)
 
     if os.path.isfile(out_file):
@@ -78,18 +87,26 @@ def download_file(url: str, out_file: str) -> None:
 
     tmp_file = out_file + '.tmp'
     label = os.path.basename(out_file)
-    try:
-        urllib.request.urlretrieve(
-            url, tmp_file,
-            reporthook=lambda c, b, t: _progress(c, b, t, label),
-        )
-        sys.stdout.write('\n')
-        os.rename(tmp_file, out_file)
-    except Exception as e:
+
+    for attempt in range(1, retries + 1):
         if os.path.isfile(tmp_file):
             os.remove(tmp_file)
-        sys.stdout.write(f'\n  [FAIL] {url}\n         {e}\n')
-        raise
+        try:
+            urllib.request.urlretrieve(
+                url, tmp_file,
+                reporthook=lambda c, b, t: _progress(c, b, t, label),
+            )
+            sys.stdout.write('\n')
+            os.rename(tmp_file, out_file)
+            return
+        except Exception as e:
+            if os.path.isfile(tmp_file):
+                os.remove(tmp_file)
+            if attempt < retries:
+                sys.stdout.write(f'\n  [retry {attempt}/{retries}] {e}\n')
+            else:
+                sys.stdout.write(f'\n  [FAIL after {retries} attempts] {url}\n         {e}\n')
+                raise
 
 
 def fetch_scene_list() -> List[str]:
@@ -127,7 +144,13 @@ def download_frames_25k(out_dir: str) -> None:
     print(f'\nDownloaded. Unzip with:  unzip {out_file} -d {os.path.join(out_dir, "tasks")}')
 
 
+_YES_FLAG = False   # set to True by --yes
+
+
 def confirm(prompt: str) -> None:
+    if _YES_FLAG:
+        print(f'  [--yes] {prompt} — auto-confirmed')
+        return
     try:
         input(prompt + ' (Enter to continue, Ctrl-C to abort) ')
     except KeyboardInterrupt:
@@ -150,9 +173,17 @@ def main() -> None:
                    help='specific scene ids (overrides --num_scenes)')
     p.add_argument('--include_optional', action='store_true',
                    help='also fetch segmentation/aggregation JSONs')
+    p.add_argument('--file_types', nargs='+', metavar='EXT',
+                   help='override which file types to fetch, e.g. --file_types _vh_clean_2.ply _vh_clean_2.labels.ply '
+                        '(skips .sens — use this to grab meshes only, ~50-100 MB/scene)')
+    p.add_argument('--yes', '-y', action='store_true',
+                   help='skip confirmation prompts (for non-interactive / background use)')
     p.add_argument('--start', type=int, default=0,
                    help='start index into the scene list (use to fetch a different slice next time)')
     args = p.parse_args()
+
+    global _YES_FLAG
+    _YES_FLAG = args.yes
 
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -171,9 +202,12 @@ def main() -> None:
         return
 
     # mode == 'scenes'
-    file_types = list(ESSENTIAL_FILETYPES)
-    if args.include_optional:
-        file_types += OPTIONAL_FILETYPES
+    if args.file_types:
+        file_types = list(args.file_types)
+    else:
+        file_types = list(ESSENTIAL_FILETYPES)
+        if args.include_optional:
+            file_types += OPTIONAL_FILETYPES
 
     if args.scene_ids:
         scenes = args.scene_ids
@@ -181,9 +215,12 @@ def main() -> None:
         all_scenes = fetch_scene_list()
         scenes = all_scenes[args.start:args.start + args.num_scenes]
 
-    est_gb = len(scenes) * 2.5  # rough — .sens dominates at ~1-4 GB per scene
-    print(f'\nWill fetch {len(file_types)} file types for {len(scenes)} scene(s).')
-    print(f'Estimated size: ~{est_gb:.0f} GB  (mostly .sens files)')
+    has_sens = any('.sens' in ft for ft in file_types)
+    est_gb = len(scenes) * (2.5 if has_sens else 0.1)
+    size_note = 'mostly .sens files' if has_sens else 'meshes only (~50-100 MB/scene)'
+    print(f'\nWill fetch {len(file_types)} file type(s) for {len(scenes)} scene(s).')
+    print(f'File types: {file_types}')
+    print(f'Estimated size: ~{est_gb:.0f} GB  ({size_note})')
     print(f'First scenes: {scenes[:5]}{"..." if len(scenes) > 5 else ""}')
     confirm('Proceed?')
 

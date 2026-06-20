@@ -96,7 +96,7 @@ The "metric grounding" module replaces what was originally planned as `models/ad
 
 ## 4. Limitations (acknowledge in paper)
 
-1. **Requires clean anchor depths at inference.** Stage 0 used GT-quality ScanNet depth at the 500 sampled locations. Real sparse-depth sensors (ToF, LiDAR) produce noisier values. We need a noise-robustness sub-experiment: degrade anchor depth with Gaussian noise and quantify ARE degradation curves. _(Owner: Stage 0.5 — half-day task, before TSDF integration.)_
+1. **Requires clean anchor depths at inference.** Stage 0 used GT-quality ScanNet depth at the 500 sampled locations. Real sparse-depth sensors (ToF, LiDAR) produce noisier values. **Stage 0.5 noise experiment completed** — see §7 and `docs/images/noise_sensitivity.png`. Key finding: both methods are stable up to σ=0.10 m; at σ=0.25 m LS is actually more robust than RANSAC because homogeneous Gaussian noise averages out under LS (see §7 for full analysis). RANSAC is the right choice for ScanNet because its dominant noise is *structural* (dropouts, reflections), not Gaussian.
 
 2. **Affine fit only corrects global per-frame error.** Any local depth structure errors — e.g., systematic bias at object edges or thin structures — pass through uncorrected. The empirical 90% δ<1.05 rate means ~10% of pixels are off by more than 5%; these residuals will appear as TSDF blur but are within the 5cm voxel tolerance for our use case.
 
@@ -140,11 +140,13 @@ The 5+ days saved here are the single largest scope improvement since Phase 1. A
 
 Before moving on to visibility-aware TSDF fusion, confirm:
 
-- [ ] `src/occlusynth/models/metric_grounding.py` implemented with the algorithm above
-- [ ] Closed-form fit reproduces the §1 numbers on `scene0000_00` (regression test)
-- [ ] Same fit run on 5 additional held-out ScanNet scenes — record mean and worst-case ARE
-- [ ] Stage 0.5 noise-robustness: degrade anchors with σ ∈ {0.01, 0.05, 0.10, 0.25 m} Gaussian noise, plot ARE vs σ
-- [ ] Per-frame `(a, b)` values written to disk per frame for TSDF fusion consumption
+- [x] `src/occlusynth/models/metric_grounding.py` implemented (`fit_metric_depth`, `apply_metric_correction`, `ground_scene`, `eval_scene`)
+- [x] Closed-form fit reproduces §1 numbers on `scene0000_00` — ARE=0.024 at 382×512 (regression-pinned in `tests/test_metric_grounding.py`)
+- [x] Multi-scene eval on 10 held-out val scenes — mean ARE 0.024, worst scene 0.032, 0/10 DEGRADE (`tests/test_multi_scene.py`)
+- [x] Stage 0.5 noise-robustness: σ ∈ {0, 0.01, 0.05, 0.10, 0.25 m} × anchor counts {500, 250, 100, 50} — plots in `docs/images/`, pinned in `tests/test_robustness_ablation.py`
+  - Both methods stable σ ≤ 0.10 m; RANSAC degrades at σ=0.25 m (Gaussian mismatches outlier model); LS stable throughout
+  - 100 anchors = 500 anchors in practice (ΔARE < 0.001); 50 still reasonable
+- [x] Per-frame `(a, b)` written to `demo_outputs/grounding/<scene_id>_grounding.json`
 - [ ] Decision documented in commit message linking to this file
 
 ---
@@ -154,3 +156,4 @@ Before moving on to visibility-aware TSDF fusion, confirm:
 > **Ship `PerFrameRANSAC` affine fit (`depth_metric = a · depth_pred + b`) as the metric-grounding component of OccluSynth.** No model training is required for this step. The learned alternative is logged as Phase 2 future work and explicitly out of MVP scope.
 
 Next component: visibility-aware TSDF fusion with ray-casting to populate the third `p_observed` voxel channel. See `docs/fusion_design.md` (to be written).
+ 
