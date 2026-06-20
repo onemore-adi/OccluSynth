@@ -1,7 +1,41 @@
-# OccluSynth
+# OccluSynth — Occlusion-Aware 3D Scene Reconstruction
 
-**Occlusion-Aware 3D Scene Reconstruction in Partially Observable Real-World Environments**  
-Aditya Agarwal · National Institute of Technology, Rourkela
+- **Problem Statement Number** - `TODO: fill in your problem statement number`
+- **Problem Statement Title** - `TODO: must exactly match one of the 11 Samsung EnnovateX AX Hackathon Problem Statements`
+- **Team name** - `TODO: same as Phase 1 team name`
+- **Team members (Names)** - Aditya Agarwal
+- **Institute/College Name** - National Institute of Technology, Rourkela
+- **Final Presentation Google Drive Link** - `TODO: openly-accessible Google Drive PDF link`
+- **Full Submission Demo Video Link** - `TODO: YouTube public/unlisted link (OccluSynth_demo.mp4 — Google Drive not allowed for video)`
+- **Setup & Result Reproducibility Video Link** - `TODO: YouTube public/unlisted link`
+
+### Project Artefacts
+
+- **Technical Documentation** - See the [`docs/`](docs/) folder:
+  - [`docs/architecture.md`](docs/architecture.md) — full technical architecture, design decisions, camera-pose strategy, OSS stack
+  - [`docs/ax.md`](docs/ax.md) — **agentic AI development writeup** (how this was built with open-weight models / agentic tooling)
+  - [`docs/completer_sprint.md`](docs/completer_sprint.md) — 3D U-Net completer spec, contracts, status
+  - [`docs/safety_benchmark.md`](docs/safety_benchmark.md) — risk-aware planner safety benchmark
+  - [`docs/adapter_design.md`](docs/adapter_design.md) — depth-adapter scaffold design
+- **Source Code** - All source in [`src/occlusynth/`](src/occlusynth/); orchestration scripts in [`scripts/`](scripts/); tests in [`tests/`](tests/). Installable via `pip install -e .` (see Installation below).
+- **Models Used** -
+  - [VGGT-Omega](https://github.com/facebookresearch/vggt) — open-weight feed-forward 3D geometry transformer (depth / pose). `TODO: confirm exact Hugging Face / checkpoint link for the Omega 1B-512 weights you used`
+- **Models Published** - `OccluSynth Completer` (3D U-Net, occluded-region SDF completion) — **not yet published to Hugging Face.** `TODO: publish checkpoints/interim_64_aug/completer_best.pt under an open license and add the HF link here, or mark N/A`
+- **Datasets Used** -
+  - [ScanNet v2](http://www.scan-net.org/) — primary RGB-D + GT mesh dataset (non-commercial research licence)
+  - [Microsoft 7-Scenes](https://www.microsoft.com/en-us/research/project/rgb-d-dataset-7-scenes/) — cross-dataset generalisation probe
+- **Datasets Published** - Completer training crops are **generated locally** from ScanNet (`scripts/generate_completer_data.py`) and not redistributed (ScanNet licence). N/A.
+
+### Attribution
+
+OccluSynth builds on **[VGGT-Omega](https://github.com/facebookresearch/vggt)** (Meta AI) for feed-forward monocular depth/pose prediction. VGGT is used as a frozen, off-the-shelf predictor only.
+
+**New work developed in this project (not in VGGT):**
+- Visibility-aware TSDF fusion that labels every voxel `free` / `surface` / `occluded` / `unobservable` (`src/occlusynth/fusion/`)
+- RANSAC metric-grounding to lift VGGT's scale-ambiguous depth to metric scale (`src/occlusynth/models/metric_grounding.py`)
+- The **OccluSynth Completer** — a 3D U-Net that predicts SDF inside occluded volumes (`src/occlusynth/models/`, `scripts/train_completer.py`)
+- A risk-graded A* planner over the completed cost map (`scripts/run_planner.py`)
+- Full evaluation harness (geometry, completer, robustness, cross-dataset, safety benchmark)
 
 ---
 
@@ -13,26 +47,6 @@ voxel grid that explicitly labels every voxel as **free** (confirmed empty),
 view — the robot's "blind spot"), or **unobservable** (never in any frustum).
 A 3D U-Net completer then predicts the SDF inside the occluded volume —
 recovering geometry that is absent from every depth image.
-
----
-
-## Pose source
-
-**All fusion uses ScanNet ground-truth camera poses** (`pose/<frame_id>.txt`),
-not poses predicted by VGGT-Omega.
-
-VGGT-Omega's absolute trajectory error on 6 frames is **~70 cm** — 14× the
-5 cm voxel pitch. Fusing at that pose error produces blurred, doubled surfaces.
-ScanNet GT poses are themselves the output of BundleFusion (a standard
-visual-inertial odometry system). Using them is equivalent to assuming a
-calibrated odometry source — a documented, standard assumption for any RGB-D
-reconstruction system (KinectFusion, BundleFusion, ElasticFusion all do the
-same). In a real deployment this would be replaced by a VIO system or SLAM.
-
-See `docs/architecture.md §Camera Pose Strategy` for the full rationale and
-the OOM analysis of why more frames do not fix the pose problem on Apple Silicon.
-
----
 
 ## Pipeline
 
@@ -52,7 +66,33 @@ RGB-D frames + ScanNet GT poses
   Completed dense SDF  →  risk-graded planner (A* on cost map)
 ```
 
+## Pose source
+
+**All fusion uses ScanNet ground-truth camera poses**, not poses predicted by
+VGGT-Omega. VGGT-Omega's absolute trajectory error on 6 frames is **~70 cm** —
+14× the 5 cm voxel pitch — which produces blurred, doubled surfaces. ScanNet GT
+poses are the output of BundleFusion, equivalent to assuming a calibrated
+odometry source (the standard assumption for KinectFusion / BundleFusion /
+ElasticFusion). In a real deployment this is replaced by a VIO / SLAM front-end.
+See [`docs/architecture.md`](docs/architecture.md) §Camera Pose Strategy.
+
 ---
+
+## Installation
+
+```bash
+# Python 3.12 environment for open3d / rerun / completer training
+python3.12 -m venv .venv312
+source .venv312/bin/activate
+pip install -e .
+
+# VGGT-Omega is an external dependency — clone separately (see docs/architecture.md)
+# Place the checkpoint at: vggt/vggt-omega/checkpoints/vggt_omega_1b_512.pt
+```
+
+> Two environments are used: `.venv` (Python 3.14, VGGT inference / MPS) and
+> `.venv312` (Python 3.12, open3d 0.19 fusion + completer training). See
+> [`docs/architecture.md`](docs/architecture.md) for the full rationale.
 
 ## Quick start
 
@@ -75,56 +115,22 @@ RGB-D frames + ScanNet GT poses
   --ckpt checkpoints/completer_best.pt
 ```
 
----
+## Reproducing the demo video
 
-## Data
-
-### ScanNet v2 (primary)
-
-Requires ScanNet v2 (non-commercial research licence).
-GT meshes in `data/scannet/scans/<scene>/<scene>_vh_clean_2.ply`.
-RGB-D frames in `data/scannet/tasks/scannet_frames_25k/`.
-
-### 7-Scenes (cross-dataset generalisation probe)
-
-Used in `scripts/run_crossdataset.py` to verify that the frozen
-RANSAC-grounding + visibility-fusion pipeline generalises beyond ScanNet.
-No retraining is required.
-
-**Download** from the [Microsoft Research 7-Scenes page](https://www.microsoft.com/en-us/research/project/rgb-d-dataset-7-scenes/)
-and extract so the layout matches:
-
-```
-data/7scenes/
-  chess/
-    seq-01/
-      frame-000000.color.png   (640×480 RGB)
-      frame-000000.depth.png   (640×480 uint16 mm)
-      frame-000000.pose.txt    (4×4 camera-to-world)
-      frame-000001.color.png
-      …
-    seq-02/
-    …
-  fire/
-    seq-01/
-    …
-```
-
-All 7-Scenes sequences share fixed Kinect v1 intrinsics
-(`fx=fy=585, cx=320, cy=240` at 640×480); no per-sequence calibration
-file is needed.
-
-**Run the cross-dataset probe:**
+The demo video is assembled from rendered clips (not screen-recorded). See the
+[shot capture guide](files/OccluSynth_shot_capture_guide.md):
 
 ```bash
-.venv312/bin/python scripts/run_crossdataset.py \
-    --seqs chess/seq-01 fire/seq-01 \
-    --data_root data/7scenes \
-    --n_frames 6
-```
+# orbit a .ply into a smooth clip (auto-detects the scene's up axis)
+.venv312/bin/python turntable.py --ply <file.ply> --out clips/shotNN.mp4 --seconds 24
 
-Outputs: `demo_outputs/crossdataset/results.json`,
-`docs/images/crossdataset_chess_seq-01.png`, per-sequence `.rrd`.
+# hold a still image / crossfade two images
+./clipkit.sh still <img.png> <secs> clips/shotNN.mp4
+
+# stitch everything (+ optional narration.m4a) into OccluSynth_demo.mp4
+./assemble_video.sh                 # full cut
+MODE=short ./assemble_video.sh      # ~90s cut
+```
 
 ---
 
@@ -136,14 +142,18 @@ Outputs: `demo_outputs/crossdataset/results.json`,
 | occluded_as_free | 42.00 | 0.701 | 0.121 |
 | **OccluSynth Completer** | **27.14** | **0.722** | **0.349** |
 
-Full surface/occluded split in `demo_outputs/completer_eval/results.json`.
+Geometry surface/occluded split (`demo_outputs/geometry_eval/results.json`):
 
-> All metrics above are from the **interim 64³ MPS checkpoint** (`checkpoints/interim_64_aug/completer_best.pt`, epoch 32, val_loss 0.1857). The full 96³ A100 training run is scripted and ready (`python scripts/train_completer.py --device cuda --epochs 50 --batch_size 4 --crop_size 96`; data prepared) — it was not executed this phase due to compute access, not missing work, and is expected to improve all metrics.
+| Method | Chamfer L1 ↓ | F-score@5cm ↑ | Occluded F-score ↑ |
+|---|---|---|---|
+| TSDF-only | 3.11 cm | 74.1% | 0.0% (cannot see behind walls) |
+| **OccluSynth** | **1.77 cm** | **83.5%** | **32.0%** |
 
----
+> Metrics are from the **interim 64³ MPS checkpoint** (`checkpoints/interim_64_aug/completer_best.pt`,
+> epoch 32). The full 96³ A100 run is scripted and data-prepared
+> (`scripts/train_completer.py --device cuda --crop_size 96`); it was not executed
+> this phase due to compute access, not missing work, and is expected to improve all metrics.
 
-## Docs
+## License
 
-- `context.md` — living plan: completed chapters, current status, next steps
-- `docs/architecture.md` — design decisions and rationale
-- `docs/completer_sprint.md` — completer chapter: spec, contracts, status
+[MIT](LICENSE) © 2026 Aditya Agarwal

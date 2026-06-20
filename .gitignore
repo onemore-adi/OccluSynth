@@ -9,6 +9,7 @@ dist/
 build/
 .eggs/
 .venv/
+.venv*/
 venv/
 *.egg
 
@@ -19,6 +20,16 @@ vggt/
 
 # Generated outputs (reproducible, not source)
 demo_outputs/
+
+# Video build artifacts (demo goes to YouTube per submission rules, not git)
+OccluSynth_demo.mp4
+clips/
+/_turntable_frames/
+clips/_turntable_frames/
+planner_lam0.png
+planner_lam4.png
+# the video kit itself (scripts + small caption assets) IS tracked; only the
+# heavyweight rendered clips and final mp4 above are ignored.
 
 # macOS
 .DS_Store
