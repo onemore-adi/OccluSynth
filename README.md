@@ -6,8 +6,8 @@
 - **Team members (Names)** - Aditya Agarwal
 - **Institute/College Name** - National Institute of Technology, Rourkela
 - **Final Presentation Google Drive Link** - [`PDF Drive Link`](https://drive.google.com/file/d/1cRv_bYaVuypEfW7YYF2Wp7zmxNOf7FWG/view?usp=sharing)
-- **Full Submission Demo Video Link** - `TODO: YouTube public/unlisted link (OccluSynth_demo.mp4 — Google Drive not allowed for video)`
-- **Setup & Result Reproducibility Video Link** - `TODO: YouTube public/unlisted link`
+- **Full Submission Demo Video Link** - [YouTube: Demo Video](https://youtu.be/Nx2NK8ceUPw)
+- **Setup & Result Reproducibility Video Link** - [YouTube: Reproducibility Video](https://youtu.be/3Jw84Sa7_i8)
 
 ### Project Artefacts
 
