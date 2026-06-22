@@ -116,23 +116,6 @@ pip install -e .
   --ckpt checkpoints/completer_best.pt
 ```
 
-## Reproducing the demo video
-
-The demo video is assembled from rendered clips (not screen-recorded). See the
-[shot capture guide](files/OccluSynth_shot_capture_guide.md):
-
-```bash
-# orbit a .ply into a smooth clip (auto-detects the scene's up axis)
-.venv312/bin/python turntable.py --ply <file.ply> --out clips/shotNN.mp4 --seconds 24
-
-# hold a still image / crossfade two images
-./clipkit.sh still <img.png> <secs> clips/shotNN.mp4
-
-# stitch everything (+ optional narration.m4a) into OccluSynth_demo.mp4
-./assemble_video.sh                 # full cut
-MODE=short ./assemble_video.sh      # ~90s cut
-```
-
 ---
 
 ## Key results (64³ interim checkpoint)
