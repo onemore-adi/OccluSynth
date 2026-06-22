@@ -20,7 +20,7 @@
 - **Source Code** - All source in [`src/occlusynth/`](src/occlusynth/); orchestration scripts in [`scripts/`](scripts/); tests in [`tests/`](tests/). Installable via `pip install -e .` (see Installation below).
 - **Models Used** -
   - [facebook/VGGT-Omega](https://huggingface.co/facebook/VGGT-Omega) — open-weight feed-forward 3D geometry transformer (depth / pose); used as a frozen off-the-shelf predictor. GitHub: [facebookresearch/vggt](https://github.com/facebookresearch/vggt)
-- **Models Published** - [onemore-adi/occlusynth-completer](https://huggingface.co/onemore-adi/occlusynth-completer) — OccluSynth Completer (14.7 M-param 3D U-Net, occluded-region SDF completion), MIT licence. ⚠️ **Make this repo public on HuggingFace before submission.**
+- **Models Published** - [onemore-adi/occlusynth-completer](https://huggingface.co/onemore-adi/occlusynth-completer) — OccluSynth Completer (14.7 M-param 3D U-Net, occluded-region SDF completion), MIT licence.
 - **Datasets Used** -
   - [ScanNet v2](http://www.scan-net.org/) — primary RGB-D + GT mesh dataset (non-commercial research licence)
   - [Microsoft 7-Scenes](https://www.microsoft.com/en-us/research/project/rgb-d-dataset-7-scenes/) — cross-dataset generalisation probe
