@@ -19,8 +19,8 @@
   - [`docs/adapter_design.md`](docs/adapter_design.md) — depth-adapter scaffold design
 - **Source Code** - All source in [`src/occlusynth/`](src/occlusynth/); orchestration scripts in [`scripts/`](scripts/); tests in [`tests/`](tests/). Installable via `pip install -e .` (see Installation below).
 - **Models Used** -
-  - [VGGT-Omega](https://github.com/facebookresearch/vggt) — open-weight feed-forward 3D geometry transformer (depth / pose). `TODO: confirm exact Hugging Face / checkpoint link for the Omega 1B-512 weights you used`
-- **Models Published** - `OccluSynth Completer` (3D U-Net, occluded-region SDF completion) — **not yet published to Hugging Face.** `TODO: publish checkpoints/interim_64_aug/completer_best.pt under an open license and add the HF link here, or mark N/A`
+  - [facebook/VGGT-Omega](https://huggingface.co/facebook/VGGT-Omega) — open-weight feed-forward 3D geometry transformer (depth / pose); used as a frozen off-the-shelf predictor. GitHub: [facebookresearch/vggt](https://github.com/facebookresearch/vggt)
+- **Models Published** - [onemore-adi/occlusynth-completer](https://huggingface.co/onemore-adi/occlusynth-completer) — OccluSynth Completer (14.7 M-param 3D U-Net, occluded-region SDF completion), MIT licence. ⚠️ **Make this repo public on HuggingFace before submission.**
 - **Datasets Used** -
   - [ScanNet v2](http://www.scan-net.org/) — primary RGB-D + GT mesh dataset (non-commercial research licence)
   - [Microsoft 7-Scenes](https://www.microsoft.com/en-us/research/project/rgb-d-dataset-7-scenes/) — cross-dataset generalisation probe
