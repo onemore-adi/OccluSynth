@@ -113,7 +113,12 @@ pip install -e .
 
 # Evaluate vs baselines
 .venv312/bin/python scripts/eval_completer.py --device mps \
-  --ckpt checkpoints/completer_best.pt
+  --ckpt checkpoints/interim_64_aug/completer_best.pt
+
+# Figures & demo renders
+.venv312/bin/python scripts/plot_occluded_pr.py            # occluded PR curve
+.venv312/bin/python scripts/export_completed_mesh.py --scene scene0000_00 --n_frames 40
+.venv312/bin/python make_comparison_video.py              # conventional vs OccluSynth clip
 ```
 
 ---
@@ -126,17 +131,28 @@ pip install -e .
 | occluded_as_free         | 42.00               | 0.701               | 0.121          |
 | **OccluSynth Completer** | **27.14**           | **0.722**           | **0.349**      |
 
-Geometry surface/occluded split (`demo_outputs/geometry_eval/results.json`):
+Geometry surface/occluded split (`demo_outputs/geometry_eval/results.json`, 10 held-out scenes):
 
-| Method         | Chamfer L1 ↓ | F-score@5cm ↑ | Occluded F-score ↑             |
-| -------------- | ------------ | ------------- | ------------------------------ |
-| TSDF-only      | 3.11 cm      | 74.1%         | 0.0% (cannot see behind walls) |
-| **OccluSynth** | **1.77 cm**  | **83.5%**     | **32.0%**                      |
+| Method         | Chamfer L1 ↓ | Surface F-score@5cm ↑ | Occluded F-score@5cm ↑         |
+| -------------- | ------------ | --------------------- | ------------------------------ |
+| TSDF-only      | 3.05 cm      | 79.6%                 | 0.0% (cannot see behind walls) |
+| **OccluSynth** | **2.20 cm**  | **84.7%**             | **37.2%**                      |
+
+In the occluded region specifically, OccluSynth reaches **57.6% surface recall @5cm**
+(vs **0%** for any observation-only method — no sensor measures behind a surface) at
+**27.4% precision** — a deliberate recall-first operating point: a missed obstacle is a
+collision, a phantom one is a slowdown. The full precision–recall sweep with per-voxel
+confidence is in `docs/images/occluded_pr_curve.png` (`scripts/plot_occluded_pr.py`).
 
 > Metrics are from the **interim 64³ MPS checkpoint** (`checkpoints/interim_64_aug/completer_best.pt`,
-> epoch 32). The full 96³ A100 run is scripted and data-prepared
-> (`scripts/train_completer.py --device cuda --crop_size 96`); it was not executed
-> this phase due to compute access, not missing work, and is expected to improve all metrics.
+> epoch 32). **Model exploration (64³):** we ablated three improvements over this
+> checkpoint — explicit occluded/unobservable mask input channels, a multi-task loss
+> (truncated near-surface SDF + occupancy BCE + free-space hinge), and 3.66× multi-density
+> training data (each scene fused at 6/10/20 views). None beat the baseline on held-out
+> val (reproduce via `train_completer.py --v2 --w_occ … --w_free …` and
+> `scripts/make_multidensity_crops.py`), indicating architecture and data are near their
+> ceiling at this resolution. The remaining lever is a higher-resolution 96³ run on GPU
+> (`--device cuda --crop_size 96`), scripted and data-prepared but not executed (compute access).
 
 ## License
 

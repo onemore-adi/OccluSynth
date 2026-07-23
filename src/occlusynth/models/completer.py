@@ -94,13 +94,26 @@ class OccluSynthCompleter(nn.Module):
                     load cleanly into both variants (dropout has no parameters).
 
     ~14.7M parameters — fits MPS memory at batch=4, crop=96³.
+
+    v2 options (both default OFF so existing checkpoints load unchanged):
+        in_channels=7:  sdf, weight, p_observed + one-hot state (4 channels).
+                        Without the state channels OCCLUDED and UNOBSERVABLE
+                        voxels have IDENTICAL features (sdf=+1, w=0, p_obs=0) —
+                        the network cannot see which region it is asked to fill.
+                        Explicit mask channels follow SCFusion / image inpainting.
+        occ_head=True:  head outputs 2 channels — [0]=SDF (metres), [1]=occupancy
+                        logit. Channel 0 keeps every existing consumer working
+                        (they index [:, 0]); the logit gives a calibrated p_occ
+                        for the planner without MC-dropout sign-counting.
     """
 
     def __init__(self, in_channels: int = 3, base: int = 32,
-                 mc_dropout: bool = False):
+                 mc_dropout: bool = False, occ_head: bool = False):
         super().__init__()
         chs = [base, base * 2, base * 4, base * 8]      # [32, 64, 128, 256]
         dp  = 0.2 if mc_dropout else 0.0
+        self.in_channels = in_channels
+        self.occ_head = occ_head
 
         self.stem = nn.Sequential(_conv_block(in_channels, chs[0]),
                                   _conv_block(chs[0], chs[0]))
@@ -114,7 +127,7 @@ class OccluSynthCompleter(nn.Module):
         self.dec2 = _DecoderBlock(chs[2], chs[1], chs[1], dropout_p=dp)
         self.dec1 = _DecoderBlock(chs[1], chs[0], chs[0], dropout_p=dp)
 
-        self.head = nn.Conv3d(chs[0], 1, kernel_size=1)
+        self.head = nn.Conv3d(chs[0], 2 if occ_head else 1, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         s0 = self.stem(x)        # (B,  32, D,    H,    W)
@@ -191,13 +204,18 @@ def predict_with_uncertainty(
         neg_sum = torch.zeros_like(inp[:, :1])   # count of samples with SDF < 0
 
         for _ in range(n_samples):
-            sample = model(inp)                   # (B, 1, D, H, W)
+            out    = model(inp)                   # (B, 1 or 2, D, H, W)
+            sample = out[:, :1]                   # SDF channel
             count += 1
             delta  = sample - mean
             mean   = mean + delta / count
             delta2 = sample - mean
             M2     = M2 + delta * delta2
-            neg_sum = neg_sum + (sample < 0).to(mean.dtype)
+            # occupancy: calibrated logit head when present, else SDF sign
+            if out.shape[1] > 1:
+                neg_sum = neg_sum + torch.sigmoid(out[:, 1:2])
+            else:
+                neg_sum = neg_sum + (sample < 0).to(mean.dtype)
 
         var    = M2 / max(count - 1, 1)          # sample variance (n>=2 needed)
         std    = var.sqrt()
@@ -220,3 +238,65 @@ def masked_l1_loss(pred: torch.Tensor, target: torch.Tensor,
     if mask.sum() == 0:
         return pred.sum() * 0.0          # degenerate crop — keep graph, no NaN
     return (pred[:, 0] - target).abs()[mask].mean()
+
+
+def add_state_channels(inp: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
+    """(B, 3, ...) + (B, ...) int state → (B, 7, ...): sdf, weight, p_observed,
+    then one-hot [unobservable, free, surface, occluded]."""
+    onehot = F.one_hot(state.long(), num_classes=4)       # (B, ..., 4)
+    onehot = onehot.movedim(-1, 1).to(inp.dtype)          # (B, 4, ...)
+    return torch.cat([inp, onehot], dim=1)
+
+
+def completion_loss(
+    pred: torch.Tensor,          # (B, 1 or 2, D, H, W) — [0]=sdf, [1]=occ logit
+    target: torch.Tensor,        # (B, D, H, W) GT SDF in metres
+    state: torch.Tensor,         # (B, D, H, W) voxel states
+    trunc: float = 0.30,         # supervise distances only up to ±30 cm
+    w_near: float = 2.0,         # extra weight within 10 cm of the GT surface
+    w_occ: float = 0.5,          # occupancy-BCE weight (needs 2-channel pred)
+    w_free: float = 0.2,         # observed-free-space hinge weight
+    free_margin: float = 0.10,   # predicted SDF in FREE space must stay ≥ this
+):
+    """v2 completion loss. Returns (total, components dict).
+
+    Design (each term has a literature counterpart):
+      sdf:  L1 between clamp(pred)±trunc and clamp(GT)±trunc on SURFACE∪OCCLUDED,
+            up-weighted near the GT zero-crossing. Raw-metres L1 is dominated by
+            far-field distances (GT spans ±3 m; the surface band is ±2.6 cm) —
+            truncation focuses capacity where marching cubes and F-score live
+            (SG-NN log/truncated TSDF, DeepSDF clamped distances).
+      occ:  BCE of the occupancy logit vs (GT SDF < 0) on SURFACE∪OCCLUDED with
+            batch pos_weight. L1 treats ±2 cm errors as equal; sign flips change
+            occupancy — the term that safety metrics actually score.
+      free: hinge relu(margin − pred_sdf) on FREE voxels. These are OBSERVED
+            empty — supervising them is not GT leakage, and it directly
+            penalises hallucinating solid into seen free space (the cause of
+            the surface-precision drop vs TSDF-only).
+    """
+    sup = (state == SURFACE) | (state == OCCLUDED)
+    if sup.sum() == 0:
+        zero = pred.sum() * 0.0
+        return zero, {"sdf": zero, "occ": zero, "free": zero}
+
+    sdf_pred = pred[:, 0]
+    t_cl = target.clamp(-trunc, trunc)
+    p_cl = sdf_pred.clamp(-trunc, trunc)
+    w = 1.0 + w_near * (target.abs() < 0.10).to(pred.dtype)
+    l_sdf = ((p_cl - t_cl).abs() * w)[sup].sum() / w[sup].sum()
+
+    l_occ = pred.sum() * 0.0
+    if pred.shape[1] > 1 and w_occ > 0:
+        logit = pred[:, 1][sup]
+        solid = (target < 0).to(pred.dtype)[sup]
+        n_pos = solid.sum().clamp(min=1.0)
+        pos_w = ((solid.numel() - n_pos) / n_pos).clamp(0.2, 5.0)
+        l_occ = F.binary_cross_entropy_with_logits(
+            logit, solid, pos_weight=pos_w)
+
+    free = state == FREE
+    l_free = (F.relu(free_margin - sdf_pred)[free].mean()
+              if free.any() else pred.sum() * 0.0)
+
+    total = l_sdf + w_occ * l_occ + w_free * l_free
+    return total, {"sdf": l_sdf, "occ": l_occ, "free": l_free}

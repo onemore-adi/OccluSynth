@@ -98,3 +98,69 @@ def test_gradients_flow(model):
     grads = [p.grad for p in m.parameters() if p.grad is not None]
     assert len(grads) > 0
     assert all(torch.isfinite(g).all() for g in grads)
+
+
+# ── v2: state channels, occupancy head, completion_loss ─────────────────────
+
+from occlusynth.models.completer import add_state_channels, completion_loss
+
+
+def test_v2_backward_compat_old_checkpoint_shape():
+    """Default constructor must be byte-compatible with v1 checkpoints."""
+    old = OccluSynthCompleter()
+    new = OccluSynthCompleter()
+    new.load_state_dict(old.state_dict())  # raises on any shape change
+
+
+def test_add_state_channels():
+    rng = np.random.default_rng(2)
+    inp = torch.randn(2, 3, 8, 8, 8)
+    state = _random_state((2, 8, 8, 8), rng)
+    x = add_state_channels(inp, state)
+    assert x.shape == (2, 7, 8, 8, 8)
+    assert torch.equal(x[:, :3], inp)
+    # one-hot channels sum to one everywhere and match the state ids
+    assert torch.equal(x[:, 3:].sum(1), torch.ones(2, 8, 8, 8))
+    assert torch.equal(x[:, 3:].argmax(1), state)
+
+
+def test_v2_forward_two_channels():
+    m = OccluSynthCompleter(in_channels=7, occ_head=True).eval()
+    x = torch.randn(1, 7, 32, 32, 32)
+    with torch.no_grad():
+        y = m(x)
+    assert y.shape == (1, 2, 32, 32, 32)
+
+
+def test_completion_loss_zero_when_perfect():
+    """Perfect SDF + saturated correct logits + free-space margin met → ~0."""
+    target = torch.randn(1, 16, 16, 16) * 0.2
+    state = torch.full((1, 16, 16, 16), OCCLUDED, dtype=torch.long)
+    logit = torch.where(target < 0, 50.0, -50.0).unsqueeze(1)
+    pred = torch.cat([target.unsqueeze(1), logit], dim=1)
+    total, parts = completion_loss(pred, target, state)
+    assert total.item() < 1e-4
+    assert parts["free"].item() == 0.0  # no FREE voxels present
+
+
+def test_completion_loss_free_space_hinge():
+    """Predicting solid inside observed free space must be penalised."""
+    target = torch.full((1, 8, 8, 8), 0.5)
+    state = torch.full((1, 8, 8, 8), FREE, dtype=torch.long)
+    state[0, 0, 0, 0] = SURFACE  # avoid the degenerate-crop early-out
+    bad = torch.full((1, 2, 8, 8, 8), -0.5)
+    good = torch.full((1, 2, 8, 8, 8), 0.5)
+    bad[0, 0, 0, 0, 0] = good[0, 0, 0, 0, 0] = target[0, 0, 0, 0]
+    _, parts_bad = completion_loss(bad, target, state)
+    _, parts_good = completion_loss(good, target, state)
+    assert parts_bad["free"].item() > 0.1
+    assert parts_good["free"].item() == 0.0
+
+
+def test_completion_loss_truncation_caps_far_field():
+    """A 3 m far-field error must cost no more than the 0.3 m truncation."""
+    target = torch.full((1, 8, 8, 8), 3.0)
+    state = torch.full((1, 8, 8, 8), OCCLUDED, dtype=torch.long)
+    pred = torch.zeros(1, 1, 8, 8, 8)
+    total, parts = completion_loss(pred, target, state, w_occ=0.0, w_free=0.0)
+    assert parts["sdf"].item() <= 0.30 + 1e-6

@@ -32,6 +32,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from occlusynth.models.completer import (OccluSynthCompleter, masked_l1_loss,
+                                         completion_loss, add_state_channels,
                                          SURFACE, OCCLUDED)
 
 
@@ -139,21 +140,45 @@ def slice_figure(inp_sdf, pred, tgt, state, path: Path):
 
 # ── train / eval loops ────────────────────────────────────────────────────────
 
-def run_val(model, loader, device, max_batches=None):
+def run_val(model, loader, device, max_batches=None, v2=False,
+            w_occ=0.5, w_free=0.2):
+    """Returns (loss, sample, metrics). `loss` stays the checkpoint-selection
+    criterion (masked L1 for v1, completion_loss total for v2); metrics adds
+    architecture-independent numbers so v1 and v2 runs can be compared:
+    truncated L1 (±0.30 m) and occluded-region sign accuracy."""
     model.eval()
     losses, sample = [], None
+    tl1, sacc = [], []
     with torch.no_grad():
         for bi, (inp, tgt, state) in enumerate(loader):
             if max_batches and bi >= max_batches:
                 break
             inp, tgt, state = inp.to(device), tgt.to(device), state.to(device)
+            if v2:
+                inp = add_state_channels(inp, state)
             pred = model(inp)
-            losses.append(masked_l1_loss(pred, tgt, state).item())
+            if v2:
+                total, _ = completion_loss(pred, tgt, state,
+                                           w_occ=w_occ, w_free=w_free)
+                losses.append(total.item())
+            else:
+                losses.append(masked_l1_loss(pred, tgt, state).item())
+
+            sup = (state == SURFACE) | (state == OCCLUDED)
+            if sup.any():
+                d = (pred[:, 0].clamp(-0.3, 0.3) - tgt.clamp(-0.3, 0.3)).abs()
+                tl1.append(d[sup].mean().item())
+            occ = state == OCCLUDED
+            if occ.any():
+                sacc.append((((pred[:, 0] < 0) == (tgt < 0))[occ])
+                            .float().mean().item())
             if sample is None:
                 sample = (inp[0, 0].cpu().numpy(), pred[0, 0].cpu().numpy(),
                           tgt[0].cpu().numpy(), state[0].cpu().numpy())
     model.train()
-    return float(np.mean(losses)), sample
+    metrics = {"trunc_l1": float(np.mean(tl1)) if tl1 else float("nan"),
+               "occ_sign_acc": float(np.mean(sacc)) if sacc else float("nan")}
+    return float(np.mean(losses)), sample, metrics
 
 
 def main():
@@ -170,6 +195,14 @@ def main():
     p.add_argument("--augment", action="store_true",
                    help="train-only 8-variant augmentation: 4 yaw rotations × "
                         "2 horizontal flips (never z — preserves gravity)")
+    p.add_argument("--v2", action="store_true",
+                   help="completer v2: one-hot state input channels (7ch), "
+                        "occupancy head, truncated near-surface-weighted SDF "
+                        "loss + free-space hinge (see completion_loss)")
+    p.add_argument("--w_occ", type=float, default=0.5,
+                   help="v2 occupancy-BCE weight (0 disables the occ head term)")
+    p.add_argument("--w_free", type=float, default=0.2,
+                   help="v2 observed-free-space hinge weight (0 disables it)")
     p.add_argument("--fast_dev_run", action="store_true",
                    help="limit to 8 train / 2 val batches per epoch")
     p.add_argument("--no_wandb", action="store_true")
@@ -197,7 +230,8 @@ def main():
           f"{args.crop_size}³, device {device}, "
           f"augment={'on (train only)' if args.augment else 'off'}")
 
-    model = OccluSynthCompleter().to(device)
+    model = (OccluSynthCompleter(in_channels=7, occ_head=True) if args.v2
+             else OccluSynthCompleter()).to(device)
     n_params = sum(p_.numel() for p_ in model.parameters())
     print(f"model: {n_params/1e6:.2f}M params")
     if args.init_from:
@@ -231,7 +265,13 @@ def main():
             if max_train_b and bi >= max_train_b:
                 break
             inp, tgt, state = inp.to(device), tgt.to(device), state.to(device)
-            loss = masked_l1_loss(model(inp), tgt, state)
+            if args.v2:
+                inp = add_state_channels(inp, state)
+                loss, parts = completion_loss(model(inp), tgt, state,
+                                              w_occ=args.w_occ, w_free=args.w_free)
+            else:
+                loss = masked_l1_loss(model(inp), tgt, state)
+                parts = None
             opt.zero_grad(set_to_none=True)
             loss.backward()
             opt.step()
@@ -239,12 +279,18 @@ def main():
             step += 1
             if step % 10 == 0:
                 if wb:
-                    wb.log({"train/loss": loss.item(),
-                            "train/lr": sched.get_last_lr()[0]}, step=step)
+                    log = {"train/loss": loss.item(),
+                           "train/lr": sched.get_last_lr()[0]}
+                    if parts:
+                        log.update({f"train/{k}": v.item()
+                                    for k, v in parts.items()})
+                    wb.log(log, step=step)
                 print(f"  e{epoch} s{step}: train {loss.item():.4f}")
         sched.step()
 
-        val_loss, sample = run_val(model, val_dl, device, max_val_b)
+        val_loss, sample, vm = run_val(model, val_dl, device, max_val_b,
+                                       v2=args.v2, w_occ=args.w_occ,
+                                       w_free=args.w_free)
         if args.device == "mps":
             torch.mps.empty_cache()
 
@@ -253,9 +299,12 @@ def main():
         if wb:
             import wandb
             wb.log({"val/loss": val_loss,
+                    "val/trunc_l1": vm["trunc_l1"],
+                    "val/occ_sign_acc": vm["occ_sign_acc"],
                     "val/slice": wandb.Image(str(slice_path))}, step=step)
         print(f"epoch {epoch}: train {np.mean(ep_losses):.4f}  "
-              f"val {val_loss:.4f}  ({time.time()-t0:.0f}s)")
+              f"val {val_loss:.4f}  trunc_l1 {vm['trunc_l1']:.4f}  "
+              f"sign_acc {vm['occ_sign_acc']:.3f}  ({time.time()-t0:.0f}s)")
 
         ckpt = {"model": model.state_dict(), "epoch": epoch,
                 "val_loss": val_loss, "config": vars(args)}
