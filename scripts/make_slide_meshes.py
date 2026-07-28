@@ -123,7 +123,11 @@ def main():
                             str(args.width), str(args.height), str(args.zoom),
                             args.bg],
                            check=True, capture_output=True)
-            print(f"  {name:18s} {len(mesh.vertices):7d} verts → {png.relative_to(ROOT)}")
+            try:
+                shown = png.relative_to(ROOT)
+            except ValueError:      # --out_dir outside the repo
+                shown = png
+            print(f"  {name:18s} {len(mesh.vertices):7d} verts → {shown}")
 
 
 if __name__ == "__main__":
