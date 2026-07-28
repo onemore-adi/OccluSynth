@@ -62,6 +62,39 @@ If bulging bothers more than holes, use `--iso -0.01` instead. v2 checkpoints
 render via `--v2`. Note scene0635_01 only has an `n6` grid — regenerate a
 denser one (`scripts/generate_completer_data.py`) before using it in renders.
 
+## Deck / video render recipe
+
+```bash
+.venv312/bin/python scripts/export_completed_mesh.py \
+    --scene scene0000_00 --n_frames 40 \
+    --ckpt checkpoints/interim_64_aug/completer_best.pt \
+    --iso 0.01 --min_component 150 --smooth_iters 28
+```
+
+Relative to the old demo settings (6 frames, iso 0, cull 30, smooth 10) this
+turns fragmented shards into a readable room with flat floors and continuous
+walls — no change to the model or the checkpoint.
+
+**Keep the comparison honest.** `--min_component` and `--smooth_iters` are
+passed identically to the before and the after mesh by construction; do not
+change that. Cleaning up the "after" mesh more aggressively than the "before"
+would manufacture the contrast rather than show it. Likewise the amber
+geometry must stay whatever the completer predicted — the iso level is a
+threshold on the model's own SDF, not a licence to add geometry.
+
+**Sparse vs dense is a genuine trade, so pick per slide:**
+
+| setting | look | completed share of rendered triangles |
+|---|---|---|
+| `--n_frames 6` | fragmented, obviously partial | **38 %** |
+| `--n_frames 40` | clean, production-quality room | **24 %** |
+
+Sparse capture makes the completer's contribution *proportionally larger* but
+the mesh ugly; dense capture makes the mesh beautiful but the amber a smaller
+slice. The straightforward framing uses both: sparse as the hard case ("six
+frames, this is what the sensor gave us"), dense as the quality result — and
+labels which is which on the slide.
+
 ## Reproducing the analysis
 
 ```bash

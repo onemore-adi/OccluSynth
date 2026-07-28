@@ -167,6 +167,11 @@ def main() -> None:
     p.add_argument("--v2", action="store_true",
                    help="checkpoint is a v2 completer (7-channel input, occ head)")
     p.add_argument("--device", default="mps", choices=["mps", "cuda", "cpu"])
+    p.add_argument("--smooth_iters", type=int, default=10,
+                   help="Taubin smoothing iterations (volume-preserving, so it "
+                        "does not shrink geometry). Applied IDENTICALLY to the "
+                        "before and after meshes — keep it symmetric so the "
+                        "comparison stays honest.")
     p.add_argument("--no_smooth", action="store_true",
                    help="Skip Taubin smoothing (raw 5 cm voxel look)")
     p.add_argument("--iso", type=float, default=0.0,
@@ -197,7 +202,7 @@ def main() -> None:
     vox        = float(d["voxel_size"])
     sdf_norm   = d["sdf"].astype(np.float32)
     state      = d["state"]
-    smooth     = 0 if args.no_smooth else 10
+    smooth     = 0 if args.no_smooth else args.smooth_iters
 
     device = torch.device(args.device)
     ckpt   = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
