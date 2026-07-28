@@ -1,0 +1,16 @@
+# Isolated Manim render environment (Phase 2) — kept out of the occlusynth venvs
+# to protect their numpy<2 pin. Recreate with: python3.12 -m venv .venv-manim
+.venv-manim/
+
+# Manim intermediate output (partial movies, section caches, Tex logs).
+media/
+
+# Blender PNG-sequence scratch (muxed to renders/<id>.mp4 by _bl_common.render()).
+renders/_frames/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# build.sh intermediates (concat/graded/overlay/audio stages)
+build/_tmp/

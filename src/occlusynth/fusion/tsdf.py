@@ -78,6 +78,8 @@ class VisibilityResult:
     colors:     np.ndarray          # (M, 3) uint8   — accumulated surface RGB (surface only)
     dims:       tuple               # (nx, ny, nz)
     counts:     Dict[str, int]      # voxels per class
+    tsdf:       Optional[np.ndarray] = None  # (M,) float32
+    weight:     Optional[np.ndarray] = None  # (M,) float32
 
     def mask(self, label: int) -> np.ndarray:
         return self.labels == label
@@ -352,6 +354,8 @@ class VisibilityVoxelGrid:
             colors=colors,
             dims=self.dims,
             counts=counts,
+            tsdf=self.tsdf,
+            weight=self.weight,
         )
 
 

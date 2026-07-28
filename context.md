@@ -264,6 +264,22 @@ Key constants:
 
 ---
 
+## Post-finals: render-quality investigation (2026-07-28) ✓ CLOSED
+
+Feedback said renders look imperfect (holes, noisy walls, ballooning) despite
+fine KPIs. Ran a completer hyperparameter grid + parameter-preserving probes;
+full write-up in `docs/render_quality.md`. Conclusions:
+- All checkpoints (v1 shipping, v2 variants, 3.6×-data md run, w_occ/w_free
+  fine-tune) share one occluded precision/recall frontier — loss weights move
+  the operating point, not the ceiling. **v1 stays the shipping checkpoint.**
+- Fusion density is the real lever: render demos at `--n_frames 40`, not 6.
+- New tools: `scripts/probe_iso_sweep.py` (iso sweep + D4 TTA eval),
+  `export_completed_mesh.py --iso/--v2/--tag`, and
+  `train_completer.py --trunc/--w_near/--free_margin`.
+- Experiment checkpoints live in `checkpoints/exp_visual/` (local only).
+
+---
+
 ## Files NOT in git (local only)
 
 - `data/` — ScanNet frames (too large)

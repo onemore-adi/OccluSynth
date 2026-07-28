@@ -121,6 +121,11 @@ pip install -e .
 .venv312/bin/python make_comparison_video.py              # conventional vs OccluSynth clip
 ```
 
+Render quality is dominated by fusion density (`--n_frames`), with the
+marching-cubes `--iso` level as a hole-closing/anti-bulge polish dial — see
+[docs/render_quality.md](docs/render_quality.md) for the analysis and the
+recommended recipe.
+
 ---
 
 ## Key results (64³ interim checkpoint)

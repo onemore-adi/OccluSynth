@@ -141,7 +141,7 @@ def slice_figure(inp_sdf, pred, tgt, state, path: Path):
 # ── train / eval loops ────────────────────────────────────────────────────────
 
 def run_val(model, loader, device, max_batches=None, v2=False,
-            w_occ=0.5, w_free=0.2):
+            w_occ=0.5, w_free=0.2, trunc=0.30, w_near=2.0, free_margin=0.10):
     """Returns (loss, sample, metrics). `loss` stays the checkpoint-selection
     criterion (masked L1 for v1, completion_loss total for v2); metrics adds
     architecture-independent numbers so v1 and v2 runs can be compared:
@@ -159,7 +159,9 @@ def run_val(model, loader, device, max_batches=None, v2=False,
             pred = model(inp)
             if v2:
                 total, _ = completion_loss(pred, tgt, state,
-                                           w_occ=w_occ, w_free=w_free)
+                                           trunc=trunc, w_near=w_near,
+                                           w_occ=w_occ, w_free=w_free,
+                                           free_margin=free_margin)
                 losses.append(total.item())
             else:
                 losses.append(masked_l1_loss(pred, tgt, state).item())
@@ -203,6 +205,12 @@ def main():
                    help="v2 occupancy-BCE weight (0 disables the occ head term)")
     p.add_argument("--w_free", type=float, default=0.2,
                    help="v2 observed-free-space hinge weight (0 disables it)")
+    p.add_argument("--trunc", type=float, default=0.30,
+                   help="v2 SDF supervision truncation in metres")
+    p.add_argument("--w_near", type=float, default=2.0,
+                   help="v2 extra loss weight within 10 cm of the GT surface")
+    p.add_argument("--free_margin", type=float, default=0.10,
+                   help="v2 free-space hinge margin in metres")
     p.add_argument("--fast_dev_run", action="store_true",
                    help="limit to 8 train / 2 val batches per epoch")
     p.add_argument("--no_wandb", action="store_true")
@@ -268,7 +276,9 @@ def main():
             if args.v2:
                 inp = add_state_channels(inp, state)
                 loss, parts = completion_loss(model(inp), tgt, state,
-                                              w_occ=args.w_occ, w_free=args.w_free)
+                                              trunc=args.trunc, w_near=args.w_near,
+                                              w_occ=args.w_occ, w_free=args.w_free,
+                                              free_margin=args.free_margin)
             else:
                 loss = masked_l1_loss(model(inp), tgt, state)
                 parts = None
@@ -290,7 +300,9 @@ def main():
 
         val_loss, sample, vm = run_val(model, val_dl, device, max_val_b,
                                        v2=args.v2, w_occ=args.w_occ,
-                                       w_free=args.w_free)
+                                       w_free=args.w_free, trunc=args.trunc,
+                                       w_near=args.w_near,
+                                       free_margin=args.free_margin)
         if args.device == "mps":
             torch.mps.empty_cache()
 

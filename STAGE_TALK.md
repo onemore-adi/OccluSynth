@@ -1,130 +1,217 @@
-# OccluSynth — Main-Stage Talk (7–8 min) — FINAL
+# OccluSynth — Final-Round Talk (7 min) — SLIDES → DEMO → KPI
 
-**Format:** founder-style pitch. No live/interactive demo in-talk (that's the booth).
-The Reveal slide uses the **pre-rendered** comparison clip (`clips/comparison_sota.mp4`) —
-a visual aid, not the live demo. Swap for a static frame if you prefer.
+*(Previous 8-min founder-pitch version is in git history: `git show 7999d63:STAGE_TALK.md`.)*
 
-**The one failure mode (per delivery coach): going too fast.** ~930 spoken words +
-the beats + the ~14-sec Reveal clip land at **7:30–8:00** at a normal-to-measured pace.
-But adrenaline pushes first-timers faster — rush it and you finish near 6:45, sounding
-hurried. Start every section ~20% slower than feels natural. Hold the marked **[BEAT]**s —
-they feel 3× longer to you than to the room. Aim to land **7:30–7:45** with pauses intact.
+**Format:** 5 minutes of slides + 2 minutes of video, in a sandwich:
+slides 1–5 (problem → solution → innovation → the reconstruction stills) →
+**2-min demo video** → slide 6 (KPI + impact) for the close.
+
+**Materials:**
+- Deck: `OccluSynth_7min.pptx` (own laptop) / `OccluSynth_7min.pdf` (venue machine)
+- Video: `demo_video/build/OccluSynth_hb2_2min.mp4` (1:49, silent — you narrate)
+- Video talk-over: [`demo_video/VOICEOVER.md`](demo_video/VOICEOVER.md)
+- Q&A appendix: the full 12-slide `OccluSynth_Final_Round_Samsung.pptx`
+
+**The one failure mode is going too fast.** Start every section ~20% slower than
+feels natural. Hold the marked **[BEAT]**s — they feel 3× longer to you than to
+the room. The video is your pace anchor: it cannot be rushed, so match it.
 
 ## Timing map
-| # | Section | Target | Running |
-|---|---------|--------|---------|
-| 1 | Cold open — the blind spot | 0:50 | 0:50 |
-| 2 | The structural zero | 0:45 | 1:35 |
-| 3 | Reveal — OccluSynth (show clip) | 0:45 | 2:20 |
-| 4 | Why now — newly possible, we're first | 0:30 | 2:50 |
-| 5 | How it works (predict vs. leave alone + confidence) | 1:05 | 3:55 |
-| 6 | Proof — recall + the recall-first shield | 1:05 | 5:00 |
-| 7 | Market — the warehouse wedge | 0:55 | 5:55 |
-| 8 | Moat + traction | 0:40 | 6:35 |
-| 9 | The ask + close | 0:45 | 7:20 |
 
-Legend: **[BEAT]** = full 1-sec silence · *(slow)* / *(quieter)* = pace/volume · **HIT** = punch this word.
+| # | Segment | On screen | Target | Running |
+|---|---------|-----------|--------|---------|
+| 1 | Walk-on + title | Slide 1 | 0:25 | 0:25 |
+| 2 | The problem | Slide 2 | 1:10 | 1:35 |
+| 3 | Our solution | Slide 3 | 1:15 | 2:50 |
+| 4 | Innovation | Slide 4 | 0:55 | 3:45 |
+| 5 | The demo — stills | Slide 5 | 0:30 | 4:15 |
+| 6 | **DEMO VIDEO** | video, 1:49 | 1:50 | 6:05 |
+| 7 | KPI → impact → close | Slide 6 | 0:55 | 7:00 |
+
+Legend: **[BEAT]** = full 1-sec silence · *(slow)* / *(quieter)* = pace/volume ·
+**HIT** = punch this word.
 
 ---
 
 ## Script
 
-**[SLIDE 1 — Title: OCCLUSYNTH]**
-*(Walk to center. Beat. Look up before the first word. Start 20% slower than feels right.)*
+### 1 — Walk-on [SLIDE 1 — title] (0:25)
 
-A robot walks into a room. It sees a sofa. And to that robot, the world **ENDS** at the front of that sofa. *(step down, slow each phrase)* Behind it — empty. Underneath it — empty. The wall it's pushed against — doesn't exist.
+*(Walk to center. Beat. Look up before the first word.)*
 
-Every machine that perceives space today — every warehouse robot, every delivery bot, every phone scanning a room — is blind to everything it cannot **directly** see. We treat that as normal. It isn't. **[BEAT]** It's the biggest blind spot in spatial AI.
+Good [morning/afternoon]. I'm Aditya Agarwal, from NIT Rourkela — this is
+**OccluSynth**, problem statement nine: reconstructing 3D scenes when most of
+the scene is something your cameras **cannot see**.
 
-**[SLIDE 2 — Conventional reconstruction: the holey mesh]**
+### 2 — The problem [SLIDE 2] (1:20)
 
-We measured exactly how blind. We took a state-of-the-art reconstruction system, gave it a set of camera views, and asked: of the geometry hidden behind surfaces — how much can it recover? **[BEAT]** *(quieter, slow)* Zero.
+A robot walks into a room. It sees a sofa. And to that robot, the world **ENDS**
+at the front of that sofa. Behind it — nothing. Underneath it — nothing.
+**[BEAT]**
 
-And here's the thing — that's not a low score. It's **structural**. No sensor ever returns a measurement from behind a solid surface. It's not a benchmark result; it's a law of the problem. And it's the gap we fill.
+*(point at 61%)* In a typical cluttered room, sixty-one percent of the
+observable volume is occluded — hidden behind furniture. And of that hidden
+geometry, how much does a state-of-the-art reconstruction recover?
+*(quieter, slow)* **Zero.** Not a low score — **structural**. No sensor ever
+returns a measurement from behind a solid surface.
 
-Today we paper over that gap by making machines **move more** — take another photo, circle around, look again. That works until it doesn't. And it's expensive every single time.
+So today every fusion system makes one of two dishonest choices. *(gesture,
+top card)* Call the unseen space free — and the planner drives straight through
+the hidden chair leg. A **silent collision**. *(bottom card)* Or call it
+blocked — and every hidden voxel becomes a wall. The robot **freezes**.
 
-That zero is why a warehouse robot circles a pallet three times to be sure. It's why a rescue drone can't tell you what's behind the rubble without flying behind it. *(slow, quieter, eye contact with one judge)* It's the child behind the parked car. **[BEAT]**
+Unsafe, or useless. *(slow)* Warehouse robots, home robots, inspection bots —
+safety-critical autonomy cannot ship on "assume it's empty." **[BEAT]**
 
-**[SLIDE 3 — Reveal: play `comparison_sota.mp4` — grey measured + amber predicted]**
+### 3 — Our solution [SLIDE 3] (1:25)
 
-We're OccluSynth. We give machines something they've never had — the ability to reconstruct what they **can't** see.
+Our answer is an honest **third state**. *(legend row)* Every voxel is labelled
+with what the sensor actually knew: seen empty. Measured solid. **Occluded** —
+hidden, but inside the camera's view, so it can be **inferred**. And
+unobservable — outside the view entirely — which we **leave alone**. *(slow)*
+We never guess where we have no right to. That restraint is what makes the
+output trustworthy.
 
-*(Let the clip breathe — stop talking for a beat, point at the screen.)* Same room. Grey is what the cameras measured. *(beat)* Amber is what OccluSynth reconstructed — the back of the sofa, the floor beneath it, the wall behind it. Geometry no camera ever captured — from the same handful of frames, in a single pass. **[BEAT]**
+*(pipeline row, left to right)* Five stages, one pass. A frozen 3D foundation
+model — VGGT — turns plain RGB into dense depth, and sparse anchors pin it to
+metric scale. Fusion casts every pixel as a ray into a voxel grid. A 3D U-Net —
+trained on how real rooms are built — writes geometry into the occluded region
+**only**: it continues the floor under the table, closes the back of the couch.
+Monte-Carlo dropout attaches a **confidence** to every voxel it imagined. And
+the planner prices that risk — instead of trusting a guess. **[BEAT]** A map
+that knows what it's unsure of is a map you can plan around.
 
-**[SLIDE 4 — Why now]**
+### 4 — Innovation [SLIDE 4] (1:05)
 
-And this is newly possible. Two years ago, getting metric 3D from a few images took minutes and a rig. 3D foundation models changed that overnight — single-pass geometry is now cheap. Every serious robotics and AR company is building on that new geometry layer right now — and every one of them inherits the same blind spot. We're the layer on top that closes it — that makes the geometry **complete**, and tells you how much to trust it.
+What's actually new here? Against the closest published systems — Atlas,
+NeuralRecon, VGGT itself, the 3D diffusion completers — OccluSynth is the first
+to do all five of these. *(pick two, don't read the list)* The first to
+reconstruct occluded geometry and attach a per-voxel confidence to it. And the
+first to **measure** it as a safety problem — we built the benchmark, because
+none existed.
 
-**[SLIDE 5 — How it works: predict vs. leave alone + confidence]**
+The key idea is the **visibility mask as conditioning** — generation is fenced
+to the recoverable region, so the model is never rewarded for hallucinating.
+And we run **recall-first**, on purpose: a phantom obstacle costs a slowdown; a
+**missed** one costs a collision. That asymmetry is priced, per voxel.
 
-How? The key idea is restraint. We split the hidden world in two. There's space that's **occluded** — behind a surface, but still inside the camera's view. And space that's **unobservable** — outside the view completely. We predict the first. We leave the second alone. *(clean, slower)* We never guess where we have no right to — and that's what makes the output trustworthy.
+Enough diagrams. Let me show you the real thing.
 
-A 3D neural network fills those occluded regions — it continues the floor under the table, closes the back of the couch, using how real rooms are built. And every voxel it predicts carries a **confidence**. The robot doesn't just imagine geometry — it knows how much to trust each guess. A map that knows what it's unsure of is a map you can plan around.
+### 5 — The demo, in stills [SLIDE 5] (0:30)
 
-**[SLIDE 6 — Numbers]**
+*(let them look for a beat before speaking)* One apartment. Forty ordinary
+photographs, no depth sensor. **[BEAT]**
 
-Does it work? On ten scenes the model had never seen, OccluSynth recovers **fifty-eight percent** of the hidden geometry — fifty-eight percent surface recall at five centimeters — against that structural zero.
+*(left)* This is what conventional fusion returns — accurate, and **hollow**.
+*(middle)* This is OccluSynth on the identical frames; every amber patch is
+geometry **no camera in that room ever measured**. *(right)* And that is the
+ScanNet ground truth — the answer key, which the model never sees at any point.
+*(slow)* Compare the middle to the right. That is the whole claim.
 
-Now — we run **recall-first**, on purpose. *(this is the shield — say it before anyone asks)* Because the two mistakes aren't equal. A phantom obstacle costs a robot a slowdown. A **missed** one costs a collision. So we deliberately over-flag — and the per-voxel confidence lets the planner weigh each guess instead of trusting a hard map. Precision is the knob we climb with the larger model. And we built the first open benchmark that scores the occluded region as a **safety** problem — with confidence, not just an accuracy number.
+Keep this picture in mind — now watch it being built, in two minutes.
 
-**[SLIDE 7 — Market: the warehouse wedge]**
+### 6 — DEMO VIDEO [PLAY `OccluSynth_hb2_2min.mp4` — 1:49]
 
-Where does this land first? Warehouse robots. Fleets optimized to the second, where circling every shelf to peek behind it destroys throughput. Think about what occlusion costs a fleet today: a robot that stops for obstacles that aren't there burns minutes; one that clips an obstacle that **is** there burns a repair and a safety review. Single-pass correctness attacks both. A robot that acts correctly on one pass is a fleet-utilization multiplier — a buyer with a budget and a number. From there, the market is every system that has to **act before it can look**.
+Narrate over it with [`demo_video/VOICEOVER.md`](demo_video/VOICEOVER.md) —
+pointing, not teaching. The three protected silences: the **amber reveal**
+(0:31), the **sofa close-up** (1:05), and the **three-way comparison** (1:11 —
+the same three panels they just saw as stills, now turning). *(Stop talking,
+point at the screen, let them land.)* As the end card fades, advance to slide 6
+and walk back to center.
 
-And the obvious objection — why not just move the camera and look? Sometimes you can't. Often it's too expensive. And in a changing room, the view you took thirty seconds ago is already stale. *(land it)* Our map has a memory. Theirs doesn't.
+### 7 — KPI + close [SLIDE 6] (0:55)
 
-**[SLIDE 8 — Moat + traction]**
+*(top row, numbers first — they just saw it work)* Measured, not promised — ten
+held-out scenes the model had never seen. **Fifty-seven point six** percent of
+the hidden geometry recovered, against a structural **zero**. Occluded F-score
+zero to **thirty-seven**. Twenty-one percent of hidden hazards **anticipated
+before first sight**. Reconstruction error down to two-point-two centimetres.
+**[BEAT]**
 
-What's defensible here isn't the neural network — it's the **representation** and the **confidence**. We're the only system that can tell you how much of a map is imagined, and how sure we are, voxel by voxel. That audit trail — what's measured, what's inferred, and how sure — doesn't exist in any reconstruction stack today. And it's exactly what a safety board — or an insurance underwriter — needs to sign off. Today this is a working system, an open model, and the first public occlusion-safety benchmark — fully reproducible.
+*(middle row — trace it left to right with your hand; this is the "so what")*
+And this is what that buys the robot. Fill the hole, and the obstacle behind the
+sofa **enters the map at all**. Once it's in the map, its confidence becomes a
+**cost** — not an infinite wall, a price. And once risk has a price, the robot
+can hedge **before** it has line of sight. No circling. No second pass.
+*(honest, don't skip)* The map and the confidence are what ship today —
+path-level avoidance is early, and we report that openly.
 
-**[SLIDE 9 — The ask + close]**
+*(bottom row)* Which is why this lands first where looking twice is expensive.
+Warehouse fleets that burn minutes circling every pallet. Home robots where
+furniture hides most of the floor. *(slower)* Inspection and rescue — behind
+rubble, inside a duct, under a vehicle — where looking again isn't slow, it's
+**impossible**. *(quieter, slowest line of the talk)* The child behind the
+parked car. **[BEAT]**
 
-We're raising **$250K pre-seed** to do three things in twelve months: train at full scale, ship the front-end that drops our last lab assumption — known camera poses — so it runs on any robot, and land a paid warehouse pilot with a design partner.
-
-*(slow, calm — calm reads as confidence)* Object permanence for machines — the ability to reason about the unseen — is the missing layer of spatial intelligence. **[BEAT]** We built it. **[BEAT]** Come see it live at our booth. *(chin up, hold eye contact through the last two words — don't trail off)* Thank you.
+Machines have always been blind to what they cannot directly see. We treat that
+as normal. It isn't. *(land it)* The future of mapping isn't seeing more — it's
+knowing what you **cannot** see. **[BEAT]** We built it. Thank you.
 
 ---
-*Spoken words: ~930. At ~135 wpm + beats + the Reveal clip → ~7:30–7:45.*
 
-## If you hit 7:45 and must land under 8:00 (rehearse these as clean exits)
-1. **§7** — cut the whole "why not just move and look?" block; keep only **"Our map has a memory. Theirs doesn't."** (~18 sec, safest cut)
-2. **§4** — cut the "two years ago… minutes and a rig" sentence; keep "We're the layer that makes it complete."
-3. **§6** — cut "And we built the first open benchmark…" (move to Q&A)
+*Spoken words: ~700 across ~5:10 of slide time at a measured pace + 1:49 video
+with light narration → lands at 7:00 ± 15s. If the clock is short, the clean
+cut is §4's "recall-first" paragraph (move it to Q&A).*
 
-## Delivery cues (mark these on your printout)
-- §1 after **"It isn't."** — hold a full second before the blind-spot line. Don't fill it.
-- §2 **"Zero."** — quieter and slower, not louder. Then pause before "that's not a low score."
-- §2 **"the child behind the parked car"** — slowest, quietest line in the talk; beat of silence after.
-- §3 the clip — **stop talking, let it play**, point, then narrate grey→amber.
-- §9 **"We built it."** — isolate it with beats on both sides. Last word as strong as the first.
+## Delivery cues
 
-## Hardest lines — say them this way (mouth-friendly)
-- "Occluded — behind a surface, but still inside the camera's view." *(hard stop)* "Unobservable — outside the view completely." — short sentences = built-in breaths.
-- "We never guess **where we have no right to**." (not "…what we have no business guessing about")
-- "…needs to **sign off**." (confident landing, avoids the "safety-certification / insurance-underwriter" pileup)
+- §2 **"Zero."** — quieter and slower, not louder. Pause before "Not a low score."
+- §3 "We never guess **where we have no right to**" — hard stop after it.
+- §5 → §6 handoff: say "in two minutes", click play, step to the side, half-turn
+  to the screen. Don't talk until the filmstrip is rolling.
+- §5 is your safety net: if the video ever fails to play, that slide alone
+  carries the demo — talk to it and move on.
+- Video: match the timecodes, and when in doubt — silence. The footage carries it.
+- §7 has three rows — numbers, then the robot chain, then applications. Trace
+  the chain left to right with your hand; it is the bridge from metric to meaning.
+- §7 "the child behind the parked car" — slowest, quietest line of the talk,
+  with a beat after. (It's not on any slide or in the video this time — it's yours.)
+- Last two words with eye contact. Don't trail off.
 
----
+## Q&A prep (appendix deck: `OccluSynth_Final_Round_Samsung.pptx`)
 
-## Q&A prep — the questions that decide the round
-
-**Q (the hardest, from a technical judge): "Your occluded precision is under 40% — so more than half the geometry you draw isn't real. Isn't a confident hallucinated obstacle as dangerous as a missed one?"**
-> "Fair — and it's exactly why every voxel ships with a confidence, not a hard label. A false obstacle at low confidence costs a slowdown; a missed real one costs a collision. That asymmetry is the design: we tune toward recall and let the planner reason over uncertainty, not a binary map. Precision is what the 96³ model and confidence calibration are for — and we report both numbers openly, which is the point of building the benchmark."
+**Q: "Occluded precision is under 40% — isn't a hallucinated obstacle as
+dangerous as a missed one?"**
+> "It's exactly why every voxel ships with a confidence, not a hard label. A
+> false obstacle at low confidence costs a slowdown; a missed real one costs a
+> collision. We tune toward recall and let the planner reason over uncertainty —
+> and we report both numbers openly, which is the point of building the
+> benchmark." *(Appendix slide 8 has the full tables.)*
 
 **Q: "Where do the camera poses come from?"**
-> "Today we use known poses — that's our one lab assumption, and I'm not hiding it. Dropping it is a solved-in-principle SLAM/pose front-end; it's the first thing the raise funds. The completion and confidence — the hard part — don't change."
+> "Today, known poses — our one lab assumption, and I'm not hiding it. Dropping
+> it is a SLAM/VIO front-end; the completion and confidence — the hard part —
+> don't change." *(Appendix slide 10, path to production.)*
 
-**Q: "How is this different from semantic scene completion / occupancy prediction work (SSC, Occ3D)?"**
-> "Those predict a full occupancy grid and score it with one accuracy number. We do two things they don't: we separate genuinely-inferable occluded space from out-of-view space and only predict the first, and we attach per-voxel confidence and score the occluded region as a safety problem. It's completion built for a robot that has to act, not for a leaderboard."
+**Q: "How is this different from semantic scene completion / Occ3D?"**
+> "Two things they don't do: we separate genuinely-inferable occluded space from
+> out-of-view space and predict only the first; and we attach per-voxel
+> confidence and score the occluded region as a safety problem, not a
+> leaderboard number."
 
-**Q: "Does the planner actually avoid the hidden obstacles yet?"** *(be honest — do NOT overclaim)*
-> "Path-level avoidance is early — it helps on a minority of scenes today. The deliverable right now is the map and the confidence; turning that into closed-loop avoidance is downstream work, and it's on the roadmap."
+**Q: "Does the planner actually avoid hidden obstacles?"** *(don't overclaim)*
+> "Honestly — not yet, at scale. On one of the ten benchmark scenes the
+> risk-graded planner avoided 15.5% of the hidden hazards; on the other nine the
+> path was unchanged, so the aggregate is zero. The deliverable today is the map
+> and the confidence — turning that into closed-loop avoidance is the next step,
+> and we report the zero rather than the one good scene."
 
 **Q: "Isn't the 0% baseline a strawman?"**
-> "It's the opposite of a strawman — it's by construction. No observation-only method, however good, can measure behind a surface. That's the whole reason completion is a separate problem worth solving."
+> "It's by construction — no observation-only method, however good, can measure
+> behind a surface. That's exactly why completion is a separate problem worth
+> solving."
+
+**Q: "What's the compute story?"**
+> "Everything you saw trained on a 16 GB MacBook — the full 96³ A100 run is
+> scripted and about a hundred GPU-hours away. It's a compute gap, not missing
+> work." *(Appendix slide 11.)*
 
 ## Rehearsal checklist
-- [ ] 3 full run-throughs with a stopwatch; write your split times at §3, §6, §9.
-- [ ] Practice the 3 cuts as clean exits so a long clock doesn't cause a panic-skip.
-- [ ] Record yourself once; check you're not swallowing "Zero" and the last "Thank you."
-- [ ] Confirm the Reveal clip is cued and plays on the venue machine before you go on.
+
+- [ ] 3 full run-throughs with the video actually playing; write split times at
+      §3 end (2:50), video start (4:15), video end (6:05).
+- [ ] Practice the §4→video handoff until the click is invisible.
+- [ ] Confirm the venue machine plays the mp4 BEFORE you go on (and keep the
+      PDF deck as the fallback for fonts).
+- [ ] Record yourself once; check you're not swallowing "Zero" and the final
+      "Thank you."

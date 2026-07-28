@@ -52,9 +52,14 @@ MEASURED_RGB  = (0.788, 0.804, 0.827)   # light grey — measured geometry
 COMPLETED_RGB = (0.878, 0.631, 0.000)   # amber #E0A100 — imagined (HERO colour)
 
 
-def run_tiled_inference(model, partial_inp, device, tile_xy=96, overlap=16):
-    """Full-scene completion via overlapping x-y tiles (mirrors run_safety_benchmark)."""
+def run_tiled_inference(model, partial_inp, device, tile_xy=96, overlap=16,
+                        state=None):
+    """Full-scene completion via overlapping x-y tiles (mirrors run_safety_benchmark).
+
+    When ``state`` is given the tiles get one-hot state channels appended
+    (7-channel v2 input); prediction channel 0 is the SDF either way."""
     _, nx, ny, nz = partial_inp.shape
+    n_ch = 3 if state is None else 7
     step = tile_xy - overlap
     x_starts = list(range(0, nx, step))
     y_starts = list(range(0, ny, step))
@@ -73,9 +78,13 @@ def run_tiled_inference(model, partial_inp, device, tile_xy=96, overlap=16):
             for ys in y_starts:
                 ye  = min(ys + tile_xy, ny)
                 ys_ = max(ys, 0)
-                tile = np.zeros((1, 3, tile_xy, tile_xy, nz), dtype=np.float32)
+                tile = np.zeros((1, n_ch, tile_xy, tile_xy, nz), dtype=np.float32)
                 tw, th = xe - xs, ye - ys_
-                tile[0, :, :tw, :th, :nz] = partial_inp[:, xs:xe, ys_:ye, :nz]
+                tile[0, :3, :tw, :th, :nz] = partial_inp[:, xs:xe, ys_:ye, :nz]
+                if state is not None:
+                    st = state[xs:xe, ys_:ye, :nz]
+                    for s in range(4):        # one-hot: unobs, free, surf, occ
+                        tile[0, 3 + s, :tw, :th, :nz] = (st == s)
                 pred = model(torch.from_numpy(tile).to(device))[0, 0].cpu().numpy()
                 acc[xs:xe, ys_:ye, :nz] += pred[:tw, :th, :nz]
                 wts[xs:xe, ys_:ye, :nz] += 1.0
@@ -85,13 +94,18 @@ def run_tiled_inference(model, partial_inp, device, tile_xy=96, overlap=16):
     return out
 
 
-def field_to_mesh(field_m, origin, voxel_size, smooth_iters=10, min_component=30):
-    """Marching cubes at level 0 → open3d mesh (uniform grey), small shards removed."""
+def field_to_mesh(field_m, origin, voxel_size, smooth_iters=10, min_component=30,
+                  iso=0.0):
+    """Marching cubes → open3d mesh (uniform grey), small shards removed.
+
+    ``iso`` shifts the level set (solid becomes pred < iso): a positive level
+    grows predicted solids (closes holes, risks bulging), a negative one shrinks
+    them (tighter, more conservative geometry)."""
     import open3d as o3d
     from skimage import measure
 
     verts, faces, _, _ = measure.marching_cubes(
-        field_m, level=0.0, spacing=(voxel_size,) * 3)
+        field_m, level=iso, spacing=(voxel_size,) * 3)
     # MC lattice points are voxel centres: world = origin + half-voxel + coords
     verts_w = origin[None, :] + 0.5 * voxel_size + verts
 
@@ -150,9 +164,17 @@ def main() -> None:
                    help="which cached fusion to use (<scene>_n<N>.npz); denser "
                         "fusions give a cleaner measured mesh for demo renders")
     p.add_argument("--ckpt", default="checkpoints/interim_64_aug/completer_best.pt")
+    p.add_argument("--v2", action="store_true",
+                   help="checkpoint is a v2 completer (7-channel input, occ head)")
     p.add_argument("--device", default="mps", choices=["mps", "cuda", "cpu"])
     p.add_argument("--no_smooth", action="store_true",
                    help="Skip Taubin smoothing (raw 5 cm voxel look)")
+    p.add_argument("--iso", type=float, default=0.0,
+                   help="marching-cubes level in metres for the COMPLETED field "
+                        "(solid = pred < iso); positive grows predicted solids "
+                        "(closes holes, risks bulging), negative shrinks them")
+    p.add_argument("--tag", default=None,
+                   help="suffix for output filenames (keeps variants side by side)")
     p.add_argument("--min_component", type=int, default=30,
                    help="Drop disconnected components smaller than this many "
                         "triangles (declutters sparse-view shard noise; 0 = keep all)")
@@ -179,19 +201,23 @@ def main() -> None:
 
     device = torch.device(args.device)
     ckpt   = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
-    model  = OccluSynthCompleter(mc_dropout=False).to(device)
+    model  = (OccluSynthCompleter(in_channels=7, occ_head=True) if args.v2
+              else OccluSynthCompleter(mc_dropout=False)).to(device)
     model.load_state_dict(ckpt["model"])
     print(f"[export] {args.scene}  dims={state.shape}  vox={vox} m  "
-          f"ckpt ep={ckpt.get('epoch')}")
+          f"ckpt ep={ckpt.get('epoch')}  v2={args.v2}")
 
     partial_inp = np.stack([sdf_norm, d["weight"].astype(np.float32),
                             d["p_observed"].astype(np.float32)])
-    compl = run_tiled_inference(model, partial_inp, device)
+    compl = run_tiled_inference(model, partial_inp, device,
+                                state=state if args.v2 else None)
 
     before_m = sdf_norm * SURFACE_TRUNC
     occ      = state == OCCLUDED
     after_m  = before_m.copy()
-    after_m[occ] = np.clip(compl[occ], -SURFACE_TRUNC, SURFACE_TRUNC)
+    # subtract iso so marching cubes still runs at level 0: solid becomes
+    # (pred < iso) in the completed region while OBSERVED surfaces are untouched
+    after_m[occ] = np.clip(compl[occ] - args.iso, -SURFACE_TRUNC, SURFACE_TRUNC)
 
     out_dir = root / args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -222,7 +248,7 @@ def main() -> None:
 
     paths = {}
     for tag, m in (("before", mesh_b), ("after", mesh_a), ("completed_only", mesh_c)):
-        path = out_dir / f"{args.scene}_{tag}.ply"
+        path = out_dir / f"{args.scene}_{tag}{args.tag or ''}.ply"
         o3d.io.write_triangle_mesh(str(path), m, write_vertex_normals=True)
         paths[tag] = str(path.relative_to(root))
         print(f"  {tag:15s} {len(m.vertices):8d} verts  "
