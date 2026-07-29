@@ -68,8 +68,20 @@ denser one (`scripts/generate_completer_data.py`) before using it in renders.
 .venv312/bin/python scripts/export_completed_mesh.py \
     --scene scene0000_00 --n_frames 40 \
     --ckpt checkpoints/interim_64_aug/completer_best.pt \
-    --iso 0.01 --min_component 150 --smooth_iters 28
+    --iso 0.04 --min_component 150 --smooth_iters 28 --anchor
 ```
+
+Why iso +0.04 is safe here even though the val-crop sweep shows free-space
+violations rising with iso: the exporter splices completer output into
+OCCLUDED voxels only, so observed-free space keeps its measured TSDF by
+construction — higher iso grows solids in *hidden* space only, where recall
+(0.35 vs 0.26 at iso 0) is what closes holes and furniture backs. `--anchor`
+then drops completed components not connected to the measured surface band —
+the free-floating regression-to-mean blobs — which removes ~98 % of predicted
+components but only ~7 % of solid volume. Two negative results worth
+remembering: MC-dropout std gating does not beat the iso-only frontier
+(the std carries almost no information beyond the mean SDF), and D4 TTA is
+not worth 8× inference.
 
 Relative to the old demo settings (6 frames, iso 0, cull 30, smooth 10) this
 turns fragmented shards into a readable room with flat floors and continuous
@@ -94,6 +106,39 @@ the mesh ugly; dense capture makes the mesh beautiful but the amber a smaller
 slice. The straightforward framing uses both: sparse as the hard case ("six
 frames, this is what the sensor gave us"), dense as the quality result — and
 labels which is which on the slide.
+
+## Training interventions that did NOT move the frontier
+
+Four independent attempts, all measured on the same 90 val crops:
+
+1. **Loss reweighting** — `w_occ`/`w_free`/`trunc`/`w_near` grid (A–D).
+   Slides the operating point; `w_free` cut free-space violations 32 % → 0.95 %
+   but paid for it in recall.
+2. **v2 architecture** — one-hot state input channels + occupancy head.
+3. **3.6× training data** — `md_64_aug` on 1528 multi-density crops.
+4. **Multi-density resume at 1e-4** (2026-07-29) — the original md run diverged
+   (val 0.184 → 0.256); warm-restarting at a 10× lower LR fixed the divergence
+   and reached a genuinely better val loss on its own val set (0.1794, epoch 6,
+   with `trunc_l1` and `sign_acc` improving together). It still did not help:
+
+   | iso | interim (shipping) | md_resume |
+   |---|---|---|
+   | 0.00 | P 0.581 / R 0.255 | P 0.582 / R 0.225 |
+   | 0.04 | P 0.535 / R 0.351 | P 0.535 / R 0.330 |
+   | 0.10 | P 0.477 / R 0.472 | P 0.482 / R 0.457 |
+
+   Lower recall at every matched precision. The val crops are n6-only
+   (79.5 % unobservable), so this could in principle have been a sparse-regime
+   artefact — but scoring the n40 meshes against the ScanNet GT shows the same
+   ordering: completed-geometry accuracy **11.2 cm (interim) vs 13.8 cm
+   (md_resume)**, hidden GT surface recovered **36.6 % vs 33.4 %**. Worse in
+   both regimes.
+
+**`checkpoints/interim_64_aug` remains the shipping checkpoint.** Val loss is
+not a proxy for the frontier — always re-score with `probe_iso_sweep.py` before
+promoting a checkpoint. The remaining untested lever is resolution (96³); every
+64³ intervention so far lands on the same curve, which is the signal that the
+ceiling is set by voxel resolution and task ambiguity rather than by fitting.
 
 ## Reproducing the analysis
 
