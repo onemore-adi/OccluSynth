@@ -12,11 +12,8 @@
 ### Project Artefacts
 
 - **Technical Documentation** - See the [`docs/`](docs/) folder:
-  - [`docs/PROJECT_REPORT.md`](docs/PROJECT_REPORT.md) — **start here**: the project narrative, what drove each decision, and every concept explained from scratch (no background assumed)
-  - [`docs/NUMBERS_CHEATSHEET.md`](docs/NUMBERS_CHEATSHEET.md) — every KPI, precision/recall/F1, and ablation result on one scannable page
-  - [`docs/COMPLETER_DEEPDIVE.md`](docs/COMPLETER_DEEPDIVE.md) — the core innovation dissected in 10 layers
-  - [`docs/render_quality.md`](docs/render_quality.md) — render experiments: what moves output quality and what doesn't
   - [`docs/architecture.md`](docs/architecture.md) — full technical architecture, design decisions, camera-pose strategy, OSS stack
+  - [`docs/render_quality.md`](docs/render_quality.md) — completer ablations, precision/recall frontier, and the mesh-export recipe
   - [`docs/ax.md`](docs/ax.md) — **agentic AI development writeup** (how this was built with open-weight models / agentic tooling)
   - [`docs/completer_sprint.md`](docs/completer_sprint.md) — 3D U-Net completer spec, contracts, status
   - [`docs/safety_benchmark.md`](docs/safety_benchmark.md) — risk-aware planner safety benchmark
@@ -122,7 +119,6 @@ pip install -e .
 # Figures & demo renders
 .venv312/bin/python scripts/plot_occluded_pr.py            # occluded PR curve
 .venv312/bin/python scripts/export_completed_mesh.py --scene scene0000_00 --n_frames 40
-.venv312/bin/python make_comparison_video.py              # conventional vs OccluSynth clip
 ```
 
 Render quality is dominated by fusion density (`--n_frames`), with the
