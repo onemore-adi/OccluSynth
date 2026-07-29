@@ -12,6 +12,10 @@
 ### Project Artefacts
 
 - **Technical Documentation** - See the [`docs/`](docs/) folder:
+  - [`docs/PROJECT_REPORT.md`](docs/PROJECT_REPORT.md) — **start here**: the project narrative, what drove each decision, and every concept explained from scratch (no background assumed)
+  - [`docs/NUMBERS_CHEATSHEET.md`](docs/NUMBERS_CHEATSHEET.md) — every KPI, precision/recall/F1, and ablation result on one scannable page
+  - [`docs/COMPLETER_DEEPDIVE.md`](docs/COMPLETER_DEEPDIVE.md) — the core innovation dissected in 10 layers
+  - [`docs/render_quality.md`](docs/render_quality.md) — render experiments: what moves output quality and what doesn't
   - [`docs/architecture.md`](docs/architecture.md) — full technical architecture, design decisions, camera-pose strategy, OSS stack
   - [`docs/ax.md`](docs/ax.md) — **agentic AI development writeup** (how this was built with open-weight models / agentic tooling)
   - [`docs/completer_sprint.md`](docs/completer_sprint.md) — 3D U-Net completer spec, contracts, status
