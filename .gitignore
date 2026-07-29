@@ -102,3 +102,6 @@ shots/
 *.key
 /checkpoints/
 /wandb/
+
+# scratch
+test_trimesh_export.py
