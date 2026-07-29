@@ -1,5 +1,17 @@
 # OccluSynth — Occlusion-Aware 3D Scene Reconstruction
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-142%20passing-brightgreen.svg)](tests/)
+[![Model on HF](https://img.shields.io/badge/%F0%9F%A4%97%20model-occlusynth--completer-yellow)](https://huggingface.co/onemore-adi/occlusynth-completer)
+
+**Reconstructs the parts of a scene no camera ever saw.** Conventional 3D
+reconstruction treats "unobserved" as "empty" — a robot then plans straight
+through the chair leg hidden behind a sofa. OccluSynth labels every voxel with
+what the sensor *actually knew*, then predicts the geometry inside the blind
+spot: **57.6% of hidden surface recovered within 5 cm, where observation-only
+methods recover 0%.**
+
 - **Problem Statement Number** - 09
 - **Problem Statement Title** - Occlusion-Aware 3D Scene Reconstruction in Partially Observable Real-World Environments
 - **Team name** - onemore_adi
@@ -41,6 +53,15 @@ OccluSynth builds on **[VGGT-Omega](https://github.com/facebookresearch/vggt)** 
 
 ---
 
+## Contents
+
+[What it does](#what-it-does) · [Pipeline](#pipeline) · [Repository layout](#repository-layout) ·
+[Pose source](#pose-source) · [Installation](#installation) · [Quick start](#quick-start) ·
+[Tests](#tests) · [Reproducing the results](#reproducing-the-results) ·
+[Key results](#key-results-64-interim-checkpoint) · [Limitations](#limitations) · [License](#license)
+
+---
+
 ## What it does
 
 OccluSynth fuses sparse RGB-D observations into a dense, visibility-aware 3D
@@ -66,6 +87,21 @@ RGB-D frames + ScanNet GT poses
         │
         ▼
   Completed dense SDF  →  risk-graded planner (A* on cost map)
+```
+
+## Repository layout
+
+```
+src/occlusynth/
+  fusion/        visibility-aware TSDF fusion — the 4-state voxel labelling
+  models/        completer (3D U-Net), metric grounding, depth calibration, VGGT wrapper
+  planning/      risk-graded A* planner over the completed cost map
+  data/          ScanNet / 7-Scenes loaders, sparse view sampling
+  viz/           rerun + mesh visualisation helpers
+scripts/         orchestration: fusion, training, evaluation, benchmarks, export
+tests/           142 tests (unit + integration + planner)
+docs/            technical documentation and figures
+reproduce.sh     one-command re-run of every headline metric
 ```
 
 ## Pose source
@@ -118,13 +154,40 @@ pip install -e .
 
 # Figures & demo renders
 .venv312/bin/python scripts/plot_occluded_pr.py            # occluded PR curve
-.venv312/bin/python scripts/export_completed_mesh.py --scene scene0000_00 --n_frames 40
+.venv312/bin/python scripts/export_completed_mesh.py --scene scene0000_00 \
+  --n_frames 40 --iso 0.04 --anchor --min_component 150 --smooth_iters 28
 ```
 
-Render quality is dominated by fusion density (`--n_frames`), with the
-marching-cubes `--iso` level as a hole-closing/anti-bulge polish dial — see
-[docs/render_quality.md](docs/render_quality.md) for the analysis and the
+Render quality is dominated by fusion density (`--n_frames`); the marching-cubes
+`--iso` level trades hole-closing against bulging, and `--anchor` drops completed
+components not connected to measured surface. See
+[`docs/render_quality.md`](docs/render_quality.md) for the analysis and the
 recommended recipe.
+
+## Tests
+
+```bash
+.venv312/bin/python -m pytest tests/ -q
+```
+
+142 tests covering fusion visibility semantics, the completer (architecture,
+augmentation, loss masking), metric grounding, geometry evaluation, the planner,
+the safety benchmark, and cross-dataset loading.
+
+## Reproducing the results
+
+Every headline metric re-runs from cached predictions and the released checkpoint —
+no training and no GPU required:
+
+```bash
+./reproduce.sh
+```
+
+Writes a full transcript to `repro_full.log` plus one file per step
+(`repro_step1.txt` … `repro_step6.txt`). Prerequisites: `.venv312` created with
+`pip install -e .`, cached VGGT predictions in `demo_outputs/pred_cache/`, completer
+crops in `data/completer_crops/`, and the checkpoint at
+`checkpoints/interim_64_aug/completer_best.pt`.
 
 ---
 
@@ -150,15 +213,69 @@ collision, a phantom one is a slowdown. The full precision–recall sweep with p
 confidence is in `docs/images/occluded_pr_curve.png` (`scripts/plot_occluded_pr.py`).
 
 > Metrics are from the **interim 64³ MPS checkpoint** (`checkpoints/interim_64_aug/completer_best.pt`,
-> epoch 32). **Model exploration (64³):** we ablated three improvements over this
-> checkpoint — explicit occluded/unobservable mask input channels, a multi-task loss
-> (truncated near-surface SDF + occupancy BCE + free-space hinge), and 3.66× multi-density
-> training data (each scene fused at 6/10/20 views). None beat the baseline on held-out
-> val (reproduce via `train_completer.py --v2 --w_occ … --w_free …` and
-> `scripts/make_multidensity_crops.py`), indicating architecture and data are near their
-> ceiling at this resolution. The remaining lever is a higher-resolution 96³ run on GPU
-> (`--device cuda --crop_size 96`), scripted and data-prepared but not executed (compute access).
+> epoch 32), trained on a 16 GB MacBook — no cloud GPU.
+
+### Model exploration — four interventions, one frontier
+
+Four independent attempts to improve the completer at 64³ all landed on the **same
+precision/recall frontier**:
+
+| # | Intervention | Outcome |
+| - | ------------ | ------- |
+| 1 | Multi-task loss (truncated near-surface SDF + occupancy BCE + free-space hinge) | Moves *along* the frontier. The free-space hinge cut observed-free violations 32.2% → 0.95%, paid for in recall |
+| 2 | Explicit occluded/unobservable mask input channels + occupancy head | No frontier gain |
+| 3 | 3.66× multi-density training data (each scene fused at 6/10/20 views) | No frontier gain |
+| 4 | Stability-fixed retrain of (3) at 10× lower LR | Better val loss (0.1794), **still worse on the frontier** |
+
+Intervention 4 is the instructive one: it improved its *own* validation loss yet lost at
+every matched precision, and lost again when scored directly against ScanNet GT in the
+dense regime (completed-geometry accuracy 11.2 cm vs 13.8 cm). Hence the standing rule in
+[`docs/render_quality.md`](docs/render_quality.md): **validation loss is not a proxy for the
+frontier — re-score with `scripts/probe_iso_sweep.py` before promoting a checkpoint.**
+
+Reproduce via `train_completer.py --v2 --w_occ … --w_free …`,
+`scripts/make_multidensity_crops.py`, and `scripts/probe_iso_sweep.py`.
+
+Four interventions converging on one curve is itself the finding: the ceiling at this
+resolution is voxel size and inherent ambiguity, not tuning. The remaining untested lever
+is a **96³ run on GPU** (`--device cuda --crop_size 96`) — scripted and data-prepared, but
+not executed (no compute access).
+
+## Limitations
+
+Stated plainly, because they bound what the numbers above mean:
+
+- **Resolution.** All results come from a 64³ interim checkpoint trained on a
+  16 GB laptop. The 96³ run is scripted and data-prepared but never executed.
+- **Precision.** ~40–45% of predicted-solid voxels in the occluded region are wrong.
+  Some of that is irreducible (hidden geometry is genuinely ambiguous), not all.
+  The operating point is deliberately recall-first — see [Key results](#key-results-64-interim-checkpoint).
+- **Poses.** Evaluation uses ScanNet GT camera poses; a deployment would substitute
+  a VIO/SLAM front-end and inherit its drift (see [Pose source](#pose-source)).
+- **Published-baseline comparisons.** Atlas and NeuralRecon numbers quoted in the
+  docs use a different protocol (full-scene, dense video) and are **not** directly
+  comparable. The structural claim — 0% vs 37.2% in the occluded region — is the
+  defensible one.
+- **Scale.** 10 held-out scenes and 90 validation crops: indicative, not conclusive.
+- **Planner maturity.** The completed map and its per-voxel confidence are what ship;
+  path-level collision avoidance is early-stage.
+
+## Citation
+
+```bibtex
+@software{agarwal2026occlusynth,
+  author  = {Agarwal, Aditya},
+  title   = {OccluSynth: Occlusion-Aware 3D Scene Reconstruction
+             in Partially Observable Real-World Environments},
+  year    = {2026},
+  url     = {https://github.com/onemore-adi/OccluSynth},
+  license = {MIT}
+}
+```
 
 ## License
 
 [MIT](LICENSE) © 2026 Aditya Agarwal
+
+Note that dataset licences are separate: ScanNet v2 is non-commercial research-only,
+and VGGT-Omega carries its own upstream licence.
