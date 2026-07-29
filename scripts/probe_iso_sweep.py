@@ -78,6 +78,8 @@ def main():
     ap.add_argument("--device", default="mps")
     ap.add_argument("--tta", action="store_true", help="also evaluate with D4 TTA")
     ap.add_argument("--limit", type=int, default=None, help="use only N val crops")
+    ap.add_argument("--isos", type=float, nargs="*", default=None,
+                    help="iso levels in metres (default: -0.04..0.02 grid)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
@@ -85,8 +87,9 @@ def main():
     files = sorted(Path(args.data_dir).glob("*.npz"))
     if args.limit:
         files = files[:args.limit]
-    # iso levels in metres: negative thickens solids (closes holes)
-    isos = [-0.04, -0.03, -0.02, -0.015, -0.01, -0.005, 0.0, 0.005, 0.01, 0.02]
+    # solid = pred < iso, so positive iso grows solids (recall), negative shrinks
+    isos = args.isos or [-0.04, -0.03, -0.02, -0.015, -0.01, -0.005,
+                         0.0, 0.005, 0.01, 0.02]
     print(f"val crops: {len(files)}  |  iso levels: {isos}")
 
     results = {}

@@ -128,6 +128,33 @@ def field_to_mesh(field_m, origin, voxel_size, smooth_iters=10, min_component=30
     return mesh
 
 
+def anchor_filter(compl_solid: np.ndarray, state: np.ndarray,
+                  min_voxels: int = 30) -> np.ndarray:
+    """Keep only completed-solid components anchored to measured surface.
+
+    The completer extrapolates from observed anchors (floors continue under
+    tables, walls behind cabinets). A predicted-solid component that touches
+    the measured SURFACE band is an extension of evidence; one floating in
+    the void is the regression-to-mean failure mode. Returns the filtered
+    solid mask. Components smaller than ``min_voxels`` are dropped too.
+    """
+    from scipy import ndimage
+
+    lab, n = ndimage.label(compl_solid)
+    if n == 0:
+        return compl_solid
+    # surface band dilated by one voxel = the anchor zone
+    anchor = ndimage.binary_dilation(state == SURFACE)
+    anchored_ids = np.unique(lab[anchor & (lab > 0)])
+    sizes = ndimage.sum_labels(np.ones_like(lab), lab, index=np.arange(1, n + 1))
+    keep_ids = {i for i in anchored_ids if i > 0 and sizes[i - 1] >= min_voxels}
+    keep = np.isin(lab, list(keep_ids)) if keep_ids else np.zeros_like(compl_solid)
+    dropped = int(compl_solid.sum() - keep.sum())
+    print(f"  anchor filter: {n} components -> {len(keep_ids)} kept, "
+          f"{dropped} voxels removed ({100*dropped/max(compl_solid.sum(),1):.1f}% of solid)")
+    return keep
+
+
 def color_new_geometry(mesh_after, mesh_before, voxel_size):
     """Amber vertices = geometry farther than one voxel from the before-mesh —
     i.e. surface that did not exist before completion. Returns the amber mask."""
@@ -180,6 +207,10 @@ def main() -> None:
                         "(closes holes, risks bulging), negative shrinks them")
     p.add_argument("--tag", default=None,
                    help="suffix for output filenames (keeps variants side by side)")
+    p.add_argument("--anchor", action="store_true",
+                   help="drop completed-solid components not connected to "
+                        "measured surface (kills free-floating hallucinations; "
+                        "kept geometry is unchanged)")
     p.add_argument("--min_component", type=int, default=30,
                    help="Drop disconnected components smaller than this many "
                         "triangles (declutters sparse-view shard noise; 0 = keep all)")
@@ -223,6 +254,12 @@ def main() -> None:
     # subtract iso so marching cubes still runs at level 0: solid becomes
     # (pred < iso) in the completed region while OBSERVED surfaces are untouched
     after_m[occ] = np.clip(compl[occ] - args.iso, -SURFACE_TRUNC, SURFACE_TRUNC)
+
+    if args.anchor:
+        solid = (after_m < 0) & occ
+        keep = anchor_filter(solid, state)
+        # rejected voxels revert to "empty at the truncation band"
+        after_m[solid & ~keep] = SURFACE_TRUNC
 
     out_dir = root / args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
